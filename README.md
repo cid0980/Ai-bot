@@ -79,7 +79,7 @@ Home Screen) on iOS 16.4+. Android works straight from the browser
 - ↩️ **Reply** — swipe any bubble left-to-right, double-click it, or long-press → Reply. Works on your own messages too.
 - ⬇️ **Smart auto-scroll** — sticks to bottom while chatting; a "↓ New messages"
   pill appears when you're reading history.
-- 🌙☀️ **Dark / light themes** — toggle in the header, remembered per device.
+- **Espresso & paper themes** — warm charcoal dark mode and warm paper light mode with an amber accent. Toggle in the header, remembered per device.
 - 🔒 **Quick rejoin** — the 🔒 button stays in the header. Single-tap to lock, triple-tap it to jump straight back into the same room (the tab remembers the secret until closed).
 - ✓✓ **Seen receipts** — your messages show *✓ Sent*, flipping to *Seen ✓✓* the moment your friend reads them — synced even if you were offline when they read it.
 - **Clean icon set** — Lucide-style SVG icons and a self-hosted Inter font. No emoji buttons.

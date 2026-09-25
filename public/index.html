@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
-<meta name="theme-color" content="#0b1220"/>
+<meta name="theme-color" content="#14110c"/>
 <title>Chat Boy AI</title>
 <link rel="manifest" href="/manifest.webmanifest"/>
 <link rel="icon" href="/icon.svg"/>
@@ -11,18 +11,20 @@
   @font-face { font-family: 'Inter'; font-style: normal; font-weight: 100 900; font-display: swap; src: url('/fonts/inter-var.woff2') format('woff2'); }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   :root {
-    --bg: #0b1220; --glow: #16244a; --panel: #111c33; --bubble-bot: #1a2745; --bubble-me: #2563eb;
-    --text: #e8eefc; --muted: #8fa1c7; --line: rgba(255,255,255,.08);
-    --glass: rgba(11,18,32,.85); --chip: rgba(255,255,255,.07); --sysbg: rgba(255,255,255,.06);
+    --bg: #14110c; --panel: #1d1812; --bubble-bot: #26211a; --bubble-me: #e8a33d;
+    --text: #f3eee3; --muted: #a79c8c; --line: rgba(243,238,227,.1);
+    --chip: #2a241b; --sysbg: rgba(243,238,227,.06);
+    --accent: #e8a33d; --accent-text: #e8a33d; --accent-ink: #211806;
   }
   [data-theme="light"] {
-    --bg: #eef2ff; --glow: #dbeafe; --panel: #ffffff; --bubble-bot: #e2e8f0; --bubble-me: #2563eb;
-    --text: #0f172a; --muted: #64748b; --line: rgba(15,23,42,.1);
-    --glass: rgba(255,255,255,.9); --chip: #eef2ff; --sysbg: rgba(15,23,42,.06);
+    --bg: #f4eee1; --panel: #fcf9f1; --bubble-bot: #e8dfcb; --bubble-me: #e8a33d;
+    --text: #221b10; --muted: #837768; --line: rgba(34,27,16,.12);
+    --chip: #eae1cc; --sysbg: rgba(34,27,16,.05);
+    --accent: #e8a33d; --accent-text: #96650f; --accent-ink: #211806;
   }
   html, body { height: 100%; margin: 0; }
   body {
-    background: radial-gradient(120% 90% at 50% 0%, var(--glow) 0%, var(--bg) 60%);
+    background: var(--bg);
     color: var(--text);
     font-family: 'Inter', system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
     -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
@@ -31,20 +33,20 @@
   #app { width: 100%; max-width: 560px; height: 100dvh; display: flex; flex-direction: column; position: relative; }
   header {
     display: flex; align-items: center; gap: 12px; padding: 12px 14px;
-    background: var(--glass); backdrop-filter: blur(10px);
+    background: var(--panel);
     border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 5;
   }
   .logo {
     width: 44px; height: 44px; border-radius: 14px; font-size: 26px;
-    background: linear-gradient(135deg, #2563eb, #7c3aed);
+    background: var(--accent);
     display: flex; align-items: center; justify-content: center;
     user-select: none; cursor: pointer; flex-shrink: 0;
   }
   .title { flex: 1; min-width: 0; }
-  .title h1 { font-size: 17px; margin: 0; }
+  .title h1 { font-size: 18px; margin: 0; font-family: Georgia, 'Times New Roman', serif; letter-spacing: .3px; }
   .title p { font-size: 12px; margin: 2px 0 0; color: var(--muted); display: flex; align-items: center; gap: 6px; }
-  .dot { width: 8px; height: 8px; border-radius: 50%; background: #34d399; display: inline-block; }
-  .dot.away { background: #64748b; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: #57b26a; display: inline-block; }
+  .dot.away { background: #6e655a; }
   .actions { display: flex; gap: 4px; }
   .icon-btn { background: none; border: 0; padding: 8px; cursor: pointer; color: var(--text); border-radius: 12px; display: flex; align-items: center; justify-content: center; transition: background .15s, transform .1s; }
   .icon-btn:hover { background: var(--chip); }
@@ -54,10 +56,10 @@
   .msg { max-width: 82%; padding: 10px 14px; border-radius: 18px; font-size: 15px; line-height: 1.45; word-wrap: break-word; animation: pop .18s ease-out; }
   @keyframes pop { from { opacity: 0; transform: translateY(6px); } }
   .msg.bot { background: var(--bubble-bot); border-bottom-left-radius: 6px; align-self: flex-start; }
-  .msg.me { background: var(--bubble-me); border-bottom-right-radius: 6px; align-self: flex-end; color: #fff; }
+  .msg.me { background: var(--bubble-me); border-bottom-right-radius: 6px; align-self: flex-end; color: var(--accent-ink); font-weight: 500; }
   .msg.sys { align-self: center; background: var(--sysbg); font-size: 12px; color: var(--muted); border-radius: 12px; }
   .msg .quote { background: rgba(0,0,0,.18); border-radius: 10px; padding: 6px 10px; margin-bottom: 6px; font-size: 12.5px; line-height: 1.35; }
-  .msg.me .quote { background: rgba(255,255,255,.22); }
+  .msg.me .quote { background: rgba(33,24,6,.14); }
   .msg .quote b { display: block; font-size: 11px; opacity: .85; margin-bottom: 1px; }
   .editedMark { font-size: 10px; opacity: .65; margin-left: 6px; white-space: nowrap; }
   .typing { display: inline-flex; gap: 4px; padding: 4px 2px; }
@@ -74,19 +76,19 @@
   #replyCancel { background: none; border: 0; color: var(--muted); font-size: 16px; cursor: pointer; padding: 4px 8px; }
   #jumpBtn {
     position: absolute; bottom: 148px; left: 50%; transform: translateX(-50%); z-index: 6;
-    background: var(--bubble-me); color: #fff; border: 0; border-radius: 999px;
+    background: var(--accent); color: var(--accent-ink); border: 0; border-radius: 999px;
     padding: 8px 18px; font-size: 13px; font-weight: 700; cursor: pointer;
     box-shadow: 0 4px 14px rgba(0,0,0,.3); white-space: nowrap;
   }
-  form#composer { display: flex; gap: 8px; padding: 10px 14px calc(12px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: var(--glass); }
+  form#composer { display: flex; gap: 8px; padding: 10px 14px calc(12px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: var(--panel); }
   #input {
     flex: 1; background: var(--panel); border: 1px solid var(--line); color: var(--text);
     border-radius: 999px; padding: 12px 16px; font-size: 15px; outline: none;
   }
-  #input:focus { border-color: #2563eb; }
+  #input:focus { border-color: var(--accent); }
   #send {
     width: 48px; height: 48px; border-radius: 50%; border: 0; cursor: pointer;
-    background: linear-gradient(135deg, #2563eb, #7c3aed); font-size: 18px; color: #fff; flex-shrink: 0;
+    background: var(--accent); color: var(--accent-ink); flex-shrink: 0;
   }
   #sheetWrap { position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 20; display: flex; align-items: flex-end; justify-content: center; }
   #sheet {
@@ -101,17 +103,17 @@
     width: 100%; background: var(--bg); border: 1px solid var(--line); color: var(--text);
     border-radius: 12px; padding: 12px 14px; font-size: 15px; outline: none; margin-bottom: 12px;
   }
-  #sheet input:focus { border-color: #2563eb; }
+  #sheet input:focus { border-color: var(--accent); }
   .btn {
     width: 100%; border: 0; border-radius: 12px; padding: 13px; font-size: 15px; font-weight: 700;
-    background: linear-gradient(135deg, #2563eb, #7c3aed); color: #fff; cursor: pointer; margin-bottom: 8px;
+    background: var(--accent); color: var(--accent-ink); cursor: pointer; margin-bottom: 8px;
   }
   .btn.ghost { background: var(--chip); color: var(--text); font-weight: 600; }
-  #sessInfo { background: rgba(52,211,153,.08); border: 1px solid rgba(52,211,153,.25); border-radius: 12px; padding: 12px 14px; font-size: 13px; margin-bottom: 12px; }
-  #sessInfo code { color: #34d399; font-size: 15px; letter-spacing: 2px; }
+  #sessInfo { background: rgba(232,163,61,.1); border: 1px solid rgba(232,163,61,.3); border-radius: 12px; padding: 12px 14px; font-size: 13px; margin-bottom: 12px; }
+  #sessInfo code { color: var(--accent-text); font-size: 15px; letter-spacing: 2px; }
   #editBar { display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-top: 1px solid var(--line); background: var(--panel); font-size: 13px; }
   #editBar .q { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
-  #editBar .tag { color: #34d399; font-weight: 700; white-space: nowrap; }
+  #editBar .tag { color: var(--accent-text); font-weight: 700; white-space: nowrap; }
   #editCancel { background: none; border: 0; color: var(--muted); font-size: 16px; cursor: pointer; padding: 4px 8px; }
   #msgSheetWrap { position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 25; display: flex; align-items: flex-end; justify-content: center; }
   #msgSheet { width: 100%; max-width: 560px; background: var(--panel); border-radius: 24px 24px 0 0; padding: 12px 16px calc(20px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); animation: up .25s ease-out; }
@@ -132,17 +134,17 @@
   #send svg { width: 20px; height: 20px; display: block; }
   .msgBtn svg { width: 20px; height: 20px; flex-shrink: 0; opacity: .9; }
   .msgBtn:hover { background: var(--chip); }
-  #chips button:hover { border-color: #2563eb; }
+  #chips button:hover { border-color: var(--accent); }
   #jumpBtn { display: flex; align-items: center; gap: 6px; }
   #jumpBtn svg { width: 15px; height: 15px; }
-  #swipeHint svg { width: 26px; height: 26px; display: block; color: #34d399; }
+  #swipeHint svg { width: 26px; height: 26px; display: block; color: var(--accent); }
   input, button { font-family: inherit; }
   main#chat { scrollbar-width: thin; }
   main#chat::-webkit-scrollbar { width: 8px; }
-  main#chat::-webkit-scrollbar-thumb { background: rgba(128,140,170,.35); border-radius: 8px; }
+  main#chat::-webkit-scrollbar-thumb { background: rgba(167,156,140,.4); border-radius: 8px; }
   #toast {
     position: fixed; left: 50%; bottom: 90px; transform: translateX(-50%) translateY(20px);
-    background: #1e293b; color: #fff; font-size: 13px; padding: 10px 18px; border-radius: 999px;
+    background: #241f17; color: #f3eee3; font-size: 13px; padding: 10px 18px; border-radius: 999px;
     border: 1px solid var(--line); opacity: 0; transition: .25s; z-index: 30; pointer-events: none; max-width: 90vw; text-align: center;
   }
   #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
@@ -151,7 +153,7 @@
 <body>
 <div id="app">
   <header>
-    <div id="logo" class="logo" title="Chat Boy AI"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg></div>
+    <div id="logo" class="logo" title="Chat Boy AI"><svg viewBox="0 0 24 24" fill="none" stroke="#211806" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg></div>
     <div class="title">
       <h1>Chat Boy AI</h1>
       <p id="status"><span class="dot"></span><span id="statusText">Always here to help</span></p>
@@ -176,7 +178,7 @@
 
   <form id="composer">
     <input id="input" placeholder="Ask Chat Boy anything…" autocomplete="off" maxlength="2000"/>
-    <button id="send" type="submit" aria-label="Send"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4 20-7Z"/></svg></button>
+    <button id="send" type="submit" aria-label="Send"><svg viewBox="0 0 24 24" fill="none" stroke="#211806" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4 20-7Z"/></svg></button>
   </form>
 
   <button id="jumpBtn" class="hidden"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg><span>New messages</span></button>
