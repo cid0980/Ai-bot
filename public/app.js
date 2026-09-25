@@ -849,7 +849,49 @@ function buildPlayer(rec) {
   };
   return wrap;
 }
-function fileToJpeg(file, maxDim = 1280, q = 0.82) {
+async function jpegDims(file) {
+  const buf = new Uint8Array(await file.slice(0, 262144).arrayBuffer());
+  if (buf[0] !== 0xFF || buf[1] !== 0xD8) return null;
+  let i = 2;
+  while (i + 9 < buf.length) {
+    if (buf[i] !== 0xFF) { i++; continue; }
+    const m = buf[i + 1];
+    if (m === 0xD8 || m === 0xD9 || (m >= 0xD0 && m <= 0xD7) || m === 0x01) { i += 2; continue; }
+    if (m >= 0xC0 && m <= 0xCF && m !== 0xC4 && m !== 0xC8 && m !== 0xCC) {
+      return { w: (buf[i + 7] << 8) | buf[i + 8], h: (buf[i + 5] << 8) | buf[i + 6] };
+    }
+    const len = (buf[i + 2] << 8) | buf[i + 3];
+    if (len < 2) return null;
+    i += 2 + len;
+  }
+  return null;
+}
+async function pngDims(file) {
+  const buf = new Uint8Array(await file.slice(0, 32).arrayBuffer());
+  if (buf[0] !== 0x89 || buf[1] !== 0x50 || buf[2] !== 0x4E || buf[3] !== 0x47) return null;
+  return { w: (buf[16] << 24) | (buf[17] << 16) | (buf[18] << 8) | buf[19],
+           h: (buf[20] << 24) | (buf[21] << 16) | (buf[22] << 8) | buf[23] };
+}
+async function fileToJpeg(file, maxDim = 1280, q = 0.82) {
+  // Fast path: read dimensions from headers, decode pre-downscaled.
+  // A 48MP camera photo (~190MB as a bitmap) would OOM a mobile tab otherwise.
+  try {
+    let dims = null;
+    if (file.type === 'image/png') dims = await pngDims(file);
+    else if (file.type === 'image/jpeg' || file.type === 'image/jpg') dims = await jpegDims(file);
+    if (dims && dims.w > 0 && dims.h > 0 && window.createImageBitmap) {
+      const sc = Math.min(1, maxDim / Math.max(dims.w, dims.h));
+      const w = Math.max(1, Math.round(dims.w * sc)), h = Math.max(1, Math.round(dims.h * sc));
+      const bmp = await createImageBitmap(file, { resizeWidth: w, resizeHeight: h, resizeQuality: 'high', imageOrientation: 'from-image' });
+      const cv = document.createElement('canvas');
+      cv.width = w; cv.height = h;
+      cv.getContext('2d').drawImage(bmp, 0, 0, w, h);
+      bmp.close();
+      const out = await new Promise(res => cv.toBlob(res, 'image/jpeg', q));
+      if (out) return out;
+    }
+  } catch { /* fall through to legacy path */ }
+  // Legacy path (small images, webp, gifs, anything the fast path rejects).
   return new Promise((res, rej) => {
     const img = new Image();
     const url = URL.createObjectURL(file);
@@ -891,7 +933,7 @@ async function sendMedia(kind, blob, meta = {}) {
     clearTimeout(typingTimer); sendTyping(false);
     pokeIdle();
     S.stick = true; S.unread = 0; paintJump(); scrollDown();
-  } catch { toast('Send failed'); }
+  } catch (e) { console.warn('media send failed', e); toast('Send failed'); }
 }
 async function sendPhotoFile(file) {
   if (!file || !file.type.startsWith('image/')) return toast('Not an image');
