@@ -212,6 +212,7 @@ function urlBase64ToUint8Array(b64) {
 
 async function ensurePush() {
   try {
+    if (!S.pushOn) return; // user switched notifications off in-app
     if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
     if (Notification.permission === 'denied') return;
     if (Notification.permission === 'default') {
@@ -304,3 +305,4 @@ chips.addEventListener('click', e => {
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
 decoyWelcome();
 setStatus();
+paintBell();

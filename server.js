@@ -71,6 +71,14 @@ const server = app.listen(PORT, '0.0.0.0', () =>
 const wss = new WebSocketServer({ server, path: '/ws' });
 const rooms = new Map(); // roomId -> { clients:Set, messages:[], wipeTimer }
 
+// Unread messages must survive so async texting works ("hey" sent while the
+// other person is away). They expire after 24h regardless — ephemerality kept.
+const MAX_AGE = 24 * 60 * 60 * 1000;
+function sweep(r) {
+  const now = Date.now();
+  r.messages = r.messages.filter(m => now - m.ts < MAX_AGE);
+}
+
 function getRoom(id) {
   if (!rooms.has(id)) rooms.set(id, { clients: new Set(), messages: [], wipeTimer: null });
   return rooms.get(id);

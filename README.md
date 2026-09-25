@@ -21,7 +21,7 @@ real end-to-end-encrypted chat with your friend. No links to share — ever.
 | Requirement | Implementation |
 |---|---|
 | Nobody can read it, not even the server | AES-256-GCM, key = PBKDF2(secret, 210k rounds). Server only stores ciphertext + a room hash. There is no plaintext anywhere outside your two screens. |
-| Deleted after you both close | Server keeps messages in RAM only. 30s after the last socket leaves (covers refreshes), the room is wiped. A server restart wipes everything instantly. |
+| Deleted after you both close | Server keeps messages in RAM only. 30s after the last socket leaves (covers refreshes), messages **everyone has seen** are wiped. **Unread** messages wait for the other person (max 24h) so async texting works. A server restart wipes everything instantly. |
 | No links | Room ID = `SHA-256("room:" + secret)`. Same secret ⇒ same room, automatically. |
 | Discreet notifications | Push payload is a fixed generic string. No sender, no content, no metadata in the notification. |
 | Looks like an AI app | Default screen is a working offline chatbot (jokes, facts, time…). The unlock gesture is invisible; the password field is disguised as an "API key". |
