@@ -837,12 +837,13 @@ function buildPlayer(rec) {
         fill.style.width = Math.min(100, (audio.currentTime / du) * 100) + '%';
         time.textContent = fmtDur(audio.currentTime) + ' / ' + fmtDur(du);
       };
+      audio.onerror = () => { btn.innerHTML = ICON.play; if (S.currentAudio === audio) S.currentAudio = null; toast('Cannot play this voice note'); };
     }
     if (audio.paused) {
       if (S.currentAudio && S.currentAudio !== audio) S.currentAudio.pause();
       S.currentAudio = audio;
-      audio.play().catch(() => {});
       btn.innerHTML = ICON.pause;
+      audio.play().catch(() => { btn.innerHTML = ICON.play; if (S.currentAudio === audio) S.currentAudio = null; toast('Playback failed — try again'); });
     } else {
       audio.pause();
     }
@@ -954,12 +955,16 @@ $('filePick').onchange = e => { const f = e.target.files[0]; e.target.value = ''
 $('camPick').onchange = e => { const f = e.target.files[0]; e.target.value = ''; if (f) sendPhotoFile(f); };
 // ── voice recorder ──
 let MR = null, MRchunks = [], MRtimer = null, MRstart = 0, MRstream = null, MRmime = '', MRdiscard = false;
+let MRAC = null, MRlevelTimer = null;
 async function startVoice() {
   if (!S.unlocked || MR) return;
   let stream;
   try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
   catch { return toast('Microphone blocked'); }
   MRstream = stream;
+  const mtrk = stream.getAudioTracks()[0];
+  if (!mtrk || mtrk.readyState !== 'live') { stream.getTracks().forEach(t => t.stop()); MRstream = null; return toast('No live microphone found'); }
+  if (mtrk.muted) { stream.getTracks().forEach(t => t.stop()); MRstream = null; return toast('Mic is muted — another app may be using it'); }
   MRmime = (window.MediaRecorder && ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'].find(t => MediaRecorder.isTypeSupported(t))) || '';
   try { MR = MRmime ? new MediaRecorder(stream, { mimeType: MRmime }) : new MediaRecorder(stream); }
   catch { stream.getTracks().forEach(t => t.stop()); MRstream = null; return toast('Recording not supported'); }
@@ -976,7 +981,25 @@ async function startVoice() {
     $('recTime').textContent = fmtDur(s);
     if (s >= 120 && MR) { try { MR.stop(); } catch {} }
   }, 500);
-  MR.start();
+  MR.start(1000);
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    MRAC = new Ctx();
+    const msrc = MRAC.createMediaStreamSource(stream);
+    const anz = MRAC.createAnalyser(); anz.fftSize = 512;
+    msrc.connect(anz);
+    const arr = new Uint8Array(anz.frequencyBinCount);
+    const dot = document.querySelector('#recBar .recDot');
+    MRlevelTimer = setInterval(() => {
+      try {
+        anz.getByteTimeDomainData(arr);
+        let sum = 0;
+        for (let i = 0; i < arr.length; i++) { const v = (arr[i] - 128) / 128; sum += v * v; }
+        const lvl = Math.min(1, Math.sqrt(sum / arr.length) * 3);
+        if (dot) dot.style.boxShadow = '0 0 0 ' + Math.round(lvl * 12) + 'px rgba(229,72,77,.45)';
+      } catch {}
+    }, 120);
+  } catch {}
 }
 function endVoice(discard) {
   MRdiscard = discard;
@@ -988,22 +1011,79 @@ async function onVoiceStop() {
   form.classList.remove('hidden');
   $('recBar').classList.add('hidden');
   if (MRstream) { MRstream.getTracks().forEach(t => t.stop()); MRstream = null; }
+  try { clearInterval(MRlevelTimer); } catch {} MRlevelTimer = null;
+  try { MRAC && MRAC.close(); } catch {} MRAC = null;
+  try { const dot = document.querySelector('#recBar .recDot'); if (dot) dot.style.boxShadow = ''; } catch {}
   const chunks = MRchunks, mime = MRmime, discard = MRdiscard, dur = Math.round((Date.now() - MRstart) / 1000);
   MR = null; MRchunks = [];
   if (discard || !chunks.length) return;
-  await sendMedia('audio', new Blob(chunks, { type: mime }), { dur, mime });
+  const blob = new Blob(chunks, { type: mime });
+  if (blob.size < 500) return toast('Recording failed — mic gave no data');
+  await sendMedia('audio', blob, { dur, mime });
 }
 $('recCancel').onclick = () => endVoice(true);
 $('recStop').onclick = () => endVoice(false);
 // ── fullscreen photo viewer ──
+// ── fullscreen photo viewer (pinch-zoom + pan + double-tap) ──
+let PZ = { scale: 1, x: 0, y: 0 }, pzT = null, pzLastTap = 0;
+function applyPZ(instant) {
+  const im = $('photoImg');
+  im.style.transition = instant ? 'none' : 'transform .18s ease';
+  im.style.transform = 'translate(' + PZ.x + 'px,' + PZ.y + 'px) scale(' + PZ.scale + ')';
+}
 function openPhoto(url) {
+  PZ = { scale: 1, x: 0, y: 0 }; pzT = null;
+  applyPZ(true);
   $('photoImg').src = url;
   $('photoSave').href = url;
   $('photoView').classList.remove('hidden');
 }
-function closePhoto() { $('photoView').classList.add('hidden'); $('photoImg').src = ''; }
-$('photoClose').onclick = closePhoto;
+function closePhoto() {
+  $('photoView').classList.add('hidden');
+  $('photoImg').src = '';
+  PZ = { scale: 1, x: 0, y: 0 }; pzT = null;
+}
+$('photoX').onclick = closePhoto;
 $('photoView').addEventListener('click', e => { if (e.target.id === 'photoView') closePhoto(); });
+$('photoImg').addEventListener('click', () => {
+  const now = Date.now();
+  if (now - pzLastTap < 300) {
+    if (PZ.scale > 1) PZ = { scale: 1, x: 0, y: 0 };
+    else PZ = { scale: 2.5, x: 0, y: 0 };
+    applyPZ(false);
+    pzLastTap = 0;
+  } else pzLastTap = now;
+});
+$('photoImg').addEventListener('touchstart', e => {
+  if (e.touches.length === 2) {
+    e.preventDefault();
+    const a = e.touches[0], b = e.touches[1];
+    pzT = { d0: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY) || 1, s0: PZ.scale,
+      x0: PZ.x, y0: PZ.y, cx: (a.clientX + b.clientX) / 2, cy: (a.clientY + b.clientY) / 2 };
+  } else if (e.touches.length === 1 && PZ.scale > 1) {
+    pzT = { pan: true, sx: e.touches[0].clientX - PZ.x, sy: e.touches[0].clientY - PZ.y };
+  }
+}, { passive: false });
+$('photoImg').addEventListener('touchmove', e => {
+  if (!pzT) return;
+  if (e.touches.length === 2 && !pzT.pan) {
+    e.preventDefault();
+    const a = e.touches[0], b = e.touches[1];
+    const d = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY) || 1;
+    PZ.scale = Math.min(4, Math.max(1, pzT.s0 * d / pzT.d0));
+    PZ.x = pzT.x0 + ((a.clientX + b.clientX) / 2 - pzT.cx);
+    PZ.y = pzT.y0 + ((a.clientY + b.clientY) / 2 - pzT.cy);
+    if (PZ.scale <= 1) { PZ.scale = 1; PZ.x = 0; PZ.y = 0; }
+    applyPZ(true);
+  } else if (e.touches.length === 1 && pzT.pan) {
+    e.preventDefault();
+    const lim = 260 * PZ.scale;
+    PZ.x = Math.max(-lim, Math.min(lim, e.touches[0].clientX - pzT.sx));
+    PZ.y = Math.max(-lim, Math.min(lim, e.touches[0].clientY - pzT.sy));
+    applyPZ(true);
+  }
+}, { passive: false });
+$('photoImg').addEventListener('touchend', e => { if (e.touches.length === 0) pzT = null; });
 
 // ── Composer ──
 form.addEventListener('submit', async e => {

@@ -190,9 +190,10 @@
   .recBtn svg { width: 18px; height: 18px; display: block; }
   #recStop { background: var(--accent); border-color: transparent; color: var(--accent-ink); }
   #photoView { position: fixed; inset: 0; z-index: 50; background: rgba(0,0,0,.92); display: flex; align-items: center; justify-content: center; }
-  #photoImg { max-width: 94vw; max-height: 86vh; border-radius: 12px; }
+  #photoImg { max-width: 94vw; max-height: 86vh; border-radius: 12px; touch-action: none; }
   .photoBar { position: absolute; bottom: calc(20px + env(safe-area-inset-bottom)); display: flex; gap: 12px; }
   .photoBar button, .photoBar a { background: rgba(255,255,255,.14); color: #fff; border: 0; border-radius: 999px; padding: 10px 22px; font-size: 14px; font-weight: 700; cursor: pointer; text-decoration: none; }
+  #photoX { position: absolute; top: calc(14px + env(safe-area-inset-top)); right: 14px; width: 46px; height: 46px; border-radius: 50%; border: 0; background: rgba(255,255,255,.16); color: #fff; font-size: 26px; line-height: 1; cursor: pointer; }
   .msg[data-id] { position: relative; }
   .msg[data-id]::before { content: ''; position: absolute; top: 0; bottom: 0; left: -70vw; right: -70vw; }
   .msg[data-id] .audPlay, .msg[data-id] .mediaImg, .msg[data-id] .quote { position: relative; z-index: 1; }
@@ -279,7 +280,7 @@
   </div>
 </div>
 
-<div id="photoView" class="hidden"><img id="photoImg" alt="Photo"/><div class="photoBar"><a id="photoSave" download="photo.jpg">Save</a><button id="photoClose" type="button">Close</button></div></div>
+<div id="photoView" class="hidden"><button id="photoX" type="button" aria-label="Close">&times;</button><img id="photoImg" alt="Photo"/><div class="photoBar"><a id="photoSave" download="photo.jpg">Save</a></div></div>
 
 <div id="toast"></div>
 <script src="/app.js"></script>
