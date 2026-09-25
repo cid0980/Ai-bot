@@ -1,21 +1,29 @@
 // Service worker: shows ONLY the generic text the server sends.
 // No sender, no message content — ever.
 self.addEventListener('push', event => {
-  let title = 'Chat Boy AI', body = 'You have a new notification';
+  event.waitUntil((async () => {
+    // Already looking at the chat? Don't buzz — the message is on screen.
+    const wins = await clients.matchAll({ type: 'window', includeUncontrolled: true });
+    if (wins.some(w => w.focused)) return;
   try {
     const d = event.data && event.data.json();
     if (d.title) title = d.title;
     if (d.body) body = d.body;
   } catch {}
-  event.waitUntil(
-    self.registration.showNotification(title, {
+    let title = 'Chat Boy AI', body = 'You have a new notification';
+    try {
+      const d = event.data && event.data.json();
+      if (d.title) title = d.title;
+      if (d.body) body = d.body;
+    } catch {}
+    await self.registration.showNotification(title, {
       body,
       icon: '/icon.svg',
       badge: '/icon.svg',
       tag: 'chat-boy-msg',
       renotify: true,
-    })
-  );
+    });
+  })());
 });
 
 // Opening from a notification lands on the DECOY screen, locked.

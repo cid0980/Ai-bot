@@ -75,8 +75,8 @@ Home Screen) on iOS 16.4+. Android works straight from the browser
   Developer settings verifies it end-to-end.
 - 🔄 **Refresh-safe session** — the tab remembers the secret until closed, so a
   refresh reconnects instantly. New/closed tab = locked again.
-- ✏️ **Edit** — long-press your message (or double-click on desktop).
-- ↩️ **Reply** — swipe any bubble left/right (or double-click on desktop).
+- ✏️ **Edit** — long-press it → Edit, then revise right in the chat box. No popups.
+- ↩️ **Reply** — swipe any bubble left-to-right, double-click it, or long-press → Reply. Works on your own messages too.
 - ⬇️ **Smart auto-scroll** — sticks to bottom while chatting; a "↓ New messages"
   pill appears when you're reading history.
 - 🌙☀️ **Dark / light themes** — toggle in the header, remembered per device.

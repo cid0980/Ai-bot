@@ -31,6 +31,7 @@ const S = {
   stick: true,         // auto-scroll pinned to bottom?
   unread: 0,           // new messages arrived while scrolled up
   online: 1,
+  editingId: null,     // message id currently being revised in the composer
   remoteTyping: null,  // friend's typing bubble element
   remoteTypingTimer: null,
 };
@@ -283,7 +284,7 @@ async function unlock(secret) {
   chips.classList.add('hidden');
   input.placeholder = 'Message…';
   chat.innerHTML = '';
-  sys('Pro connected ✓  Code: ' + code + ' — swipe to reply, long-press yours to edit');
+  sys('Pro connected ✓  Code: ' + code + ' — swipe right to reply, long-press a message for more');
   setStatus(); connect(); pokeIdle();
   await ensurePush(); // needs roomId, so it happens here
   toast('Pro replies enabled');
@@ -294,6 +295,7 @@ function lock(msg) {
   try { sessionStorage.removeItem('cb_secret'); } catch {}
   S.msgIndex.clear();
   cancelReply();
+  cancelEdit();
   hideRemoteTyping();
   S.unread = 0; S.stick = true; paintJump();
   try { S.ws && S.ws.close(); } catch {}
@@ -411,6 +413,7 @@ $('bellBtn').onclick = async () => {
 function setReply(id) {
   const rec = S.msgIndex.get(id);
   if (!rec || !S.unlocked) return;
+  if (S.editingId) cancelEdit();
   S.replyTo = { id, t: rec.text, mine: rec.mine };
   $('replyText').textContent = `${rec.mine ? 'You' : 'Friend'}: ${rec.text}`;
   $('replyBar').classList.remove('hidden');
@@ -422,71 +425,134 @@ function cancelReply() {
 }
 $('replyCancel').onclick = cancelReply;
 
-// Swipe left/right to reply, long-press own message to edit (touch)…
-let gX = 0, gY = 0, gEl = null, gLong = null, gLongFired = false;
+// ── Message action sheet (long-press / right-click menu, Instagram-style) ──
+let sheetId = null;
+function openMsgSheet(id) {
+  const rec = S.msgIndex.get(id);
+  if (!rec || !S.unlocked) return;
+  sheetId = id;
+  $('msgSheetPreview').textContent = (rec.mine ? 'You: ' : 'Friend: ') + rec.text.slice(0, 80);
+  $('msgEdit').style.display = rec.mine ? '' : 'none'; // edit: own messages only
+  $('msgSheetWrap').classList.remove('hidden');
+}
+function closeMsgSheet() { $('msgSheetWrap').classList.add('hidden'); sheetId = null; }
+$('msgReply').onclick = () => { const id = sheetId; closeMsgSheet(); if (id) setReply(id); };
+$('msgEdit').onclick = () => { const id = sheetId; closeMsgSheet(); if (id) startEdit(id); };
+$('msgCopy').onclick = async () => {
+  const rec = S.msgIndex.get(sheetId);
+  closeMsgSheet();
+  if (!rec) return;
+  try { await navigator.clipboard.writeText(rec.text); toast('Copied'); }
+  catch { toast('Copy failed'); }
+};
+$('msgSheetClose').onclick = closeMsgSheet;
+$('msgSheetWrap').addEventListener('click', e => { if (e.target.id === 'msgSheetWrap') closeMsgSheet(); });
+
+// Swipe LEFT → RIGHT to reply (bubble follows your finger, Instagram-style),
+// long-press any bubble for the Reply / Edit / Copy menu.
+let gX = 0, gY = 0, gEl = null, gLong = null, gLongFired = false, gDX = 0;
+function swipeReset() {
+  if (!gEl) return;
+  gEl.style.transition = 'transform .15s';
+  gEl.style.transform = '';
+  const el = gEl;
+  setTimeout(() => { el.style.transition = ''; }, 160);
+  $('swipeHint').style.opacity = '0';
+}
 chat.addEventListener('touchstart', e => {
   if (!S.unlocked) return;
   const b = e.target.closest('.msg[data-id]');
   if (!b) return;
   const t = e.touches[0];
-  gX = t.clientX; gY = t.clientY; gEl = b; gLongFired = false;
+  gX = t.clientX; gY = t.clientY; gEl = b; gLongFired = false; gDX = 0;
   clearTimeout(gLong);
-  if (b.classList.contains('me')) {
-    gLong = setTimeout(() => {
-      gLongFired = true;
-      if (navigator.vibrate) navigator.vibrate(25);
-      startEdit(b.dataset.id);
-    }, 550);
-  }
+  gLong = setTimeout(() => {
+    gLongFired = true;
+    if (navigator.vibrate) navigator.vibrate(25);
+    openMsgSheet(b.dataset.id);
+  }, 550);
 }, { passive: true });
 chat.addEventListener('touchmove', e => {
   if (!gEl) return;
   const t = e.touches[0];
-  if (Math.abs(t.clientX - gX) + Math.abs(t.clientY - gY) > 12) clearTimeout(gLong);
-}, { passive: true });
-chat.addEventListener('touchend', e => {
-  clearTimeout(gLong);
-  if (!S.unlocked || gLongFired || !gEl) { gEl = null; return; }
-  const t = e.changedTouches[0];
   const dx = t.clientX - gX, dy = t.clientY - gY;
-  if (Math.abs(dx) > 60 && Math.abs(dy) < 50) setReply(gEl.dataset.id);
-  gEl = null;
+  if (Math.abs(dx) + Math.abs(dy) > 12) clearTimeout(gLong); // moved → not a long-press
+  if (Math.abs(dy) > 14 && Math.abs(dy) > Math.abs(dx)) { gDX = 0; swipeReset(); return; } // scrolling
+  gDX = Math.max(0, dx); // left-to-right only
+  const pull = Math.min(gDX, 90);
+  gEl.style.transform = 'translateX(' + pull + 'px)';
+  // ↩️ arrow sits in the revealed gap (follows the row's original position).
+  const r = gEl.getBoundingClientRect(), a = $('app').getBoundingClientRect();
+  const hint = $('swipeHint');
+  hint.style.left = Math.max(4, (r.left - a.left) - pull + 8) + 'px';
+  hint.style.top = (r.top - a.top + 6) + 'px';
+  hint.style.opacity = Math.min(1, gDX / 60);
 }, { passive: true });
-// …double-click does the same on desktop.
+function swipeEnd(e) {
+  clearTimeout(gLong);
+  if (!gEl) return;
+  const id = gEl.dataset.id, dx = gDX, fired = gLongFired, y0 = gY;
+  swipeReset();
+  gEl = null; gDX = 0;
+  if (!S.unlocked || fired) return;
+  if (e && e.changedTouches && Math.abs(e.changedTouches[0].clientY - y0) >= 50) return; // was a scroll
+  if (dx >= 70 && id) setReply(id);
+}
+chat.addEventListener('touchend', swipeEnd, { passive: true });
+chat.addEventListener('touchcancel', () => swipeEnd(null), { passive: true });
+// Desktop: double-click = reply (any bubble, yours included), right-click = menu.
 chat.addEventListener('dblclick', e => {
   const b = e.target.closest('.msg[data-id]');
   if (!b || !S.unlocked) return;
-  if (b.classList.contains('me')) startEdit(b.dataset.id);
-  else setReply(b.dataset.id);
+  setReply(b.dataset.id);
+});
+chat.addEventListener('contextmenu', e => {
+  const b = e.target.closest('.msg[data-id]');
+  if (!b || !S.unlocked) return;
+  if (sheetId === b.dataset.id) return; // sheet already open (mobile long-press double-fire)
+  e.preventDefault();
+  openMsgSheet(b.dataset.id);
 });
 
-// ── Edit own message ──
-async function startEdit(id) {
+// ── Inline edit (Instagram-style: revise right in the composer, no popups) ──
+function startEdit(id) {
   const rec = S.msgIndex.get(id);
   if (!rec || !rec.mine || !S.unlocked) return;
-  const v = prompt('Edit message', rec.text);
-  if (v === null) return;
-  const text = v.trim();
-  if (!text || text === rec.text) return;
-  try {
-    const payload = { t: text };
-    if (rec.replyTo) payload.replyTo = rec.replyTo;
-    const { iv, ct } = await encryptPayload(payload);
-    if (S.ws && S.ws.readyState === 1) S.ws.send(JSON.stringify({ type: 'edit', id, iv, ct }));
-    rec.text = text; // optimistic update
-    const wrap = chat.querySelector(`.msg[data-id="${CSS.escape(id)}"]`);
-    if (wrap) {
-      const t = wrap.querySelector('.txt');
-      if (t) t.textContent = text;
-      if (!wrap.querySelector('.editedMark')) {
-        const e = document.createElement('span');
-        e.className = 'editedMark';
-        e.textContent = '(edited)';
-        wrap.appendChild(e);
-      }
-    }
-  } catch { toast('Edit failed'); }
+  cancelReply();
+  S.editingId = id;
+  $('editText').textContent = rec.text.length > 80 ? rec.text.slice(0, 80) + '…' : rec.text;
+  $('editBar').classList.remove('hidden');
+  input.value = rec.text;
+  $('send').textContent = '✓';
+  input.focus();
 }
+async function commitEdit(id, text) {
+  const rec = S.msgIndex.get(id);
+  if (!rec || text === rec.text) return; // unchanged → nothing to send
+  const payload = { t: text };
+  if (rec.replyTo) payload.replyTo = rec.replyTo;
+  const { iv, ct } = await encryptPayload(payload);
+  if (S.ws && S.ws.readyState === 1) S.ws.send(JSON.stringify({ type: 'edit', id, iv, ct }));
+  rec.text = text; // optimistic update
+  const wrap = chat.querySelector(`.msg[data-id="${CSS.escape(id)}"]`);
+  if (wrap) {
+    const t = wrap.querySelector('.txt');
+    if (t) t.textContent = text;
+    if (!wrap.querySelector('.editedMark')) {
+      const e = document.createElement('span');
+      e.className = 'editedMark';
+      e.textContent = '(edited)';
+      wrap.appendChild(e);
+    }
+  }
+}
+function cancelEdit() {
+  S.editingId = null;
+  $('editBar').classList.add('hidden');
+  input.value = '';
+  $('send').textContent = '➤';
+}
+$('editCancel').onclick = cancelEdit;
 
 // ── Typing indicator (sender side) ──
 let typingTimer = null, typingSent = false;
@@ -510,6 +576,14 @@ form.addEventListener('submit', async e => {
   if (!text) return;
   input.value = '';
   pokeIdle();
+  if (S.editingId) {
+    const id = S.editingId;
+    cancelEdit();
+    clearTimeout(typingTimer); sendTyping(false);
+    try { await commitEdit(id, text); toast('Edited ✓'); }
+    catch { toast('Edit failed'); }
+    return;
+  }
   if (!S.unlocked) { bubble(text, 'me'); decoyAnswer(text); return; }
   // Real (encrypted) send — client-generated id so we can render + edit instantly.
   try {
