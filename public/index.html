@@ -191,6 +191,8 @@
   #photoImg { max-width: 94vw; max-height: 86vh; border-radius: 12px; }
   .photoBar { position: absolute; bottom: calc(20px + env(safe-area-inset-bottom)); display: flex; gap: 12px; }
   .photoBar button, .photoBar a { background: rgba(255,255,255,.14); color: #fff; border: 0; border-radius: 999px; padding: 10px 22px; font-size: 14px; font-weight: 700; cursor: pointer; text-decoration: none; }
+  .msg[data-id] { position: relative; }
+  .msg[data-id]::before { content: ''; position: absolute; top: 0; bottom: 0; left: -70vw; right: -70vw; }
   #toast {
     position: fixed; left: 50%; bottom: 90px; transform: translateX(-50%) translateY(20px);
     background: #241f17; color: #f3eee3; font-size: 13px; padding: 10px 18px; border-radius: 999px;

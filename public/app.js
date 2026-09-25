@@ -410,7 +410,7 @@ async function unlock(secret) {
   $('attachBtn').classList.remove('hidden');
   input.placeholder = 'Message…';
   chat.innerHTML = '';
-  sys('Pro connected ✓  Code: ' + code + ' — swipe right to reply, long-press a message for more');
+  sys('Pro connected ✓  Code: ' + code + ' — swipe a message to reply, long-press for more');
   setStatus(); connect(); pokeIdle();
   await ensurePush(); // needs roomId, so it happens here
   renderAlerts();
@@ -623,8 +623,8 @@ $('msgCopy').onclick = async () => {
 $('msgSheetClose').onclick = closeMsgSheet;
 $('msgSheetWrap').addEventListener('click', e => { if (e.target.id === 'msgSheetWrap') closeMsgSheet(); });
 
-// Swipe LEFT → RIGHT to reply (bubble follows your finger, Instagram-style),
-// long-press any bubble for the Reply / Edit / Copy menu.
+// Swipe a bubble sideways (EITHER direction) to reply — the bubble follows
+// your finger, Instagram-style. Long-press any bubble for Reply / Edit / Copy.
 let gX = 0, gY = 0, gEl = null, gLong = null, gLongFired = false, gDX = 0;
 function swipeReset() {
   if (!gEl) return;
@@ -633,6 +633,7 @@ function swipeReset() {
   const el = gEl;
   setTimeout(() => { el.style.transition = ''; }, 160);
   $('swipeHint').style.opacity = '0';
+  $('swipeHint').style.transform = '';
 }
 chat.addEventListener('touchstart', e => {
   if (!S.unlocked) return;
@@ -653,15 +654,17 @@ chat.addEventListener('touchmove', e => {
   const dx = t.clientX - gX, dy = t.clientY - gY;
   if (Math.abs(dx) + Math.abs(dy) > 12) clearTimeout(gLong); // moved → not a long-press
   if (Math.abs(dy) > 14 && Math.abs(dy) > Math.abs(dx)) { gDX = 0; swipeReset(); return; } // scrolling
-  gDX = Math.max(0, dx); // left-to-right only
-  const pull = Math.min(gDX, 90);
+  gDX = Math.max(-90, Math.min(90, dx)); // either direction, clamped
+  const pull = gDX;
   gEl.style.transform = 'translateX(' + pull + 'px)';
-  // ↩️ arrow sits in the revealed gap (follows the row's original position).
+  // Arrow sits in the revealed gap (mirrored when dragging left).
   const r = gEl.getBoundingClientRect(), a = $('app').getBoundingClientRect();
   const hint = $('swipeHint');
-  hint.style.left = Math.max(4, (r.left - a.left) - pull + 8) + 'px';
+  if (pull >= 0) hint.style.left = Math.max(4, (r.left - a.left) - pull + 8) + 'px';
+  else hint.style.left = ((r.right - a.left) + 8) + 'px';
   hint.style.top = (r.top - a.top + 6) + 'px';
-  hint.style.opacity = Math.min(1, gDX / 60);
+  hint.style.transform = pull < 0 ? 'scaleX(-1)' : '';
+  hint.style.opacity = Math.min(1, Math.abs(pull) / 60);
 }, { passive: true });
 function swipeEnd(e) {
   clearTimeout(gLong);
@@ -671,7 +674,7 @@ function swipeEnd(e) {
   gEl = null; gDX = 0;
   if (!S.unlocked || fired) return;
   if (e && e.changedTouches && Math.abs(e.changedTouches[0].clientY - y0) >= 50) return; // was a scroll
-  if (dx >= 70 && id) setReply(id);
+  if (Math.abs(dx) >= 70 && id) setReply(id);
 }
 chat.addEventListener('touchend', swipeEnd, { passive: true });
 chat.addEventListener('touchcancel', () => swipeEnd(null), { passive: true });
