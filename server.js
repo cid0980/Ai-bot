@@ -148,6 +148,13 @@ wss.on('connection', (ws, req) => {
   ws.on('message', raw => {
     let m;
     try { m = JSON.parse(raw.toString()); } catch { return; }
+    // Typing indicator: relayed live, never stored (carries no content).
+    if (m.type === 'typing') {
+      for (const c of r.clients) {
+        if (c !== ws && c.readyState === 1) c.send(JSON.stringify({ type: 'typing', from: subId, on: m.on === true }));
+      }
+      return;
+    }
     // Read receipt: client confirms it rendered these messages.
     if (m.type === 'seen' && Array.isArray(m.ids)) {
       for (const msg of r.messages) {

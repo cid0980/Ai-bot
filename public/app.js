@@ -31,6 +31,8 @@ const S = {
   stick: true,         // auto-scroll pinned to bottom?
   unread: 0,           // new messages arrived while scrolled up
   online: 1,
+  remoteTyping: null,  // friend's typing bubble element
+  remoteTypingTimer: null,
 };
 
 // ── UI helpers ──
@@ -52,12 +54,17 @@ function toast(text) {
   clearTimeout(toastT);
   toastT = setTimeout(() => t.classList.remove('show'), 2200);
 }
-function showTyping() {
+function showTyping(stick = true) {
   const d = document.createElement('div');
   d.className = 'msg bot';
   d.innerHTML = '<span class="typing"><span></span><span></span><span></span></span>';
-  chat.appendChild(d); scrollDown();
+  chat.appendChild(d);
+  if (stick) scrollDown();
   return d;
+}
+function hideRemoteTyping() {
+  clearTimeout(S.remoteTypingTimer);
+  if (S.remoteTyping) { try { S.remoteTyping.remove(); } catch {} S.remoteTyping = null; }
 }
 function sendSeen(ids) {
   if (!S.unlocked || !S.ws || S.ws.readyState !== 1 || !ids.length) return;
@@ -228,8 +235,16 @@ function connect() {
     let m;
     try { m = JSON.parse(ev.data); } catch { return; }
     if (m.type === 'presence') { S.online = m.online; setStatus(); }
+    if (m.type === 'typing' && m.from !== S.mySubId) {
+      clearTimeout(S.remoteTypingTimer);
+      if (m.on) {
+        if (!S.remoteTyping || !S.remoteTyping.isConnected) S.remoteTyping = showTyping(S.stick);
+        S.remoteTypingTimer = setTimeout(hideRemoteTyping, 5000); // safety if 'off' is lost
+      } else hideRemoteTyping();
+    }
     if (m.type === 'history' && Array.isArray(m.messages)) {
       chat.innerHTML = '';
+      hideRemoteTyping();
       S.msgIndex.clear();
       S.unread = 0; S.stick = true; paintJump();
       for (const msg of m.messages) await renderMessage(msg, msg.from === S.mySubId ? 'me' : 'bot');
@@ -279,6 +294,7 @@ function lock(msg) {
   try { sessionStorage.removeItem('cb_secret'); } catch {}
   S.msgIndex.clear();
   cancelReply();
+  hideRemoteTyping();
   S.unread = 0; S.stick = true; paintJump();
   try { S.ws && S.ws.close(); } catch {}
   S.ws = null;
@@ -472,6 +488,21 @@ async function startEdit(id) {
   } catch { toast('Edit failed'); }
 }
 
+// ── Typing indicator (sender side) ──
+let typingTimer = null, typingSent = false;
+function sendTyping(on) {
+  if (!S.unlocked || !S.ws || S.ws.readyState !== 1) return;
+  if (on === typingSent) return;
+  typingSent = on;
+  try { S.ws.send(JSON.stringify({ type: 'typing', on })); } catch {}
+}
+input.addEventListener('input', () => {
+  if (!S.unlocked) return;
+  sendTyping(true);
+  clearTimeout(typingTimer);
+  typingTimer = setTimeout(() => sendTyping(false), 2500);
+});
+
 // ── Composer ──
 form.addEventListener('submit', async e => {
   e.preventDefault();
@@ -491,6 +522,7 @@ form.addEventListener('submit', async e => {
       S.msgIndex.set(id, { text, mine: true, replyTo: payload.replyTo || null });
       chatBubble(id, 'me', text, payload.replyTo || null, false);
       cancelReply();
+      clearTimeout(typingTimer); sendTyping(false);
       S.stick = true; S.unread = 0; paintJump(); scrollDown();
     } else toast('Reconnecting… try again in a sec');
   } catch { toast('Send failed'); }
