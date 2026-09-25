@@ -637,6 +637,7 @@ function swipeReset() {
 }
 chat.addEventListener('touchstart', e => {
   if (!S.unlocked) return;
+  if (e.target.closest('button, a, img, .quote')) return; // taps starting on controls stay controls
   const b = e.target.closest('.msg[data-id]');
   if (!b) return;
   const t = e.touches[0];
@@ -680,11 +681,13 @@ chat.addEventListener('touchend', swipeEnd, { passive: true });
 chat.addEventListener('touchcancel', () => swipeEnd(null), { passive: true });
 // Desktop: double-click = reply (any bubble, yours included), right-click = menu.
 chat.addEventListener('dblclick', e => {
+  if (e.target.closest('button, a, img, .quote')) return; // taps starting on controls stay controls
   const b = e.target.closest('.msg[data-id]');
   if (!b || !S.unlocked) return;
   setReply(b.dataset.id);
 });
 chat.addEventListener('contextmenu', e => {
+  if (e.target.closest('button, a, img, .quote')) return; // taps starting on controls stay controls
   const b = e.target.closest('.msg[data-id]');
   if (!b || !S.unlocked) return;
   if (sheetId === b.dataset.id) return; // sheet already open (mobile long-press double-fire)
