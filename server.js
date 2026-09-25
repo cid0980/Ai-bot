@@ -144,7 +144,7 @@ wss.on('connection', (ws, req) => {
 
   // `seen` = someone OTHER than you confirmed this message (your read receipt).
   ws.send(JSON.stringify({ type: 'history', messages: r.messages.map(m => ({
-    id: m.id, from: m.from, iv: m.iv, ct: m.ct, ts: m.ts,
+    id: m.id, from: m.from, iv: m.iv, ct: m.ct, ts: m.ts, kind: m.kind || 'text',
     edited: !!m.edited, seen: m.seenBy.some(s => s !== subId),
   })) }));
   broadcastPresence(roomId);
@@ -179,7 +179,7 @@ wss.on('connection', (ws, req) => {
     // Edit: only the original sender may edit (basic from-match guard).
     if (m.type === 'edit' && typeof m.id === 'string' && typeof m.iv === 'string' && typeof m.ct === 'string' && m.ct.length <= 20000) {
       const msg = r.messages.find(x => x.id === m.id);
-      if (msg && msg.from === subId) {
+      if (msg && msg.from === subId && !msg.kind) {
         msg.iv = m.iv; msg.ct = m.ct; msg.edited = true;
         for (const c of r.clients) {
           if (c !== ws && c.readyState === 1) c.send(JSON.stringify({ type: 'edit', message: msg }));
@@ -187,10 +187,12 @@ wss.on('connection', (ws, req) => {
       }
       return;
     }
-    if (m.type === 'msg' && typeof m.iv === 'string' && typeof m.ct === 'string' && m.ct.length <= 20000) {
+    if (m.type === 'msg' && typeof m.iv === 'string' && typeof m.ct === 'string') {
+      const kind = (m.kind === 'img' || m.kind === 'audio') ? m.kind : null;
+      if (m.ct.length > (kind ? 2800000 : 20000)) return;
       // Client-generated id (lets the sender render + edit instantly).
       const id = (typeof m.id === 'string' && /^[A-Za-z0-9-]{8,64}$/.test(m.id)) ? m.id : crypto.randomUUID();
-      const msg = { id, from: subId, iv: m.iv, ct: m.ct, ts: Date.now(), seenBy: [] };
+      const msg = { id, from: subId, iv: m.iv, ct: m.ct, ts: Date.now(), seenBy: [], ...(kind ? { kind } : {}) };
       r.messages.push(msg);
       if (r.messages.length > 200) r.messages = r.messages.slice(-200);
       for (const c of r.clients) {

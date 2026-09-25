@@ -166,6 +166,31 @@
   #accentRow .swatches { display: flex; gap: 10px; margin-left: auto; }
   .swatch { width: 28px; height: 28px; border-radius: 50%; background: var(--sw); border: 2px solid transparent; cursor: pointer; padding: 0; }
   .swatch.on { border-color: var(--text); }
+  #attachBtn { width: 48px; height: 48px; border-radius: 50%; border: 1px solid var(--line); background: var(--panel); color: var(--muted); cursor: pointer; flex-shrink: 0; display: flex; align-items: center; justify-content: center; transition: transform .1s, color .15s; }
+  #attachBtn:active { transform: scale(.9); }
+  #attachBtn svg { width: 22px; height: 22px; display: block; }
+  #attachSheetWrap { position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 25; display: flex; align-items: flex-end; justify-content: center; }
+  #attachSheet { width: 100%; max-width: 560px; background: var(--panel); border-radius: 24px 24px 0 0; padding: 12px 16px calc(20px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); animation: up .25s ease-out; }
+  .msg.media { padding: 8px; }
+  .mediaImg { display: block; max-width: 100%; max-height: 320px; border-radius: 12px; cursor: pointer; }
+  .aud { display: flex; align-items: center; gap: 10px; min-width: 200px; padding: 4px 2px; }
+  .audPlay { width: 38px; height: 38px; border-radius: 50%; border: 0; cursor: pointer; background: rgba(0,0,0,.18); color: inherit; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .msg.bot .audPlay { background: rgba(255,255,255,.14); }
+  .audPlay svg { width: 18px; height: 18px; display: block; }
+  .audBar { flex: 1; height: 4px; border-radius: 4px; background: rgba(0,0,0,.2); overflow: hidden; }
+  .msg.bot .audBar { background: rgba(255,255,255,.18); }
+  .audFill { height: 100%; width: 0%; background: currentColor; border-radius: 4px; }
+  .audTime { font-size: 11px; opacity: .75; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  #recBar { display: flex; align-items: center; gap: 12px; padding: 10px 14px calc(12px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: var(--panel); }
+  .recDot { width: 10px; height: 10px; border-radius: 50%; background: #e5484d; animation: blinkdot 1s infinite; flex-shrink: 0; }
+  #recTime { font-weight: 700; font-variant-numeric: tabular-nums; flex: 1; }
+  .recBtn { width: 44px; height: 44px; border-radius: 50%; border: 1px solid var(--line); background: var(--chip); color: var(--text); cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .recBtn svg { width: 18px; height: 18px; display: block; }
+  #recStop { background: var(--accent); border-color: transparent; color: var(--accent-ink); }
+  #photoView { position: fixed; inset: 0; z-index: 50; background: rgba(0,0,0,.92); display: flex; align-items: center; justify-content: center; }
+  #photoImg { max-width: 94vw; max-height: 86vh; border-radius: 12px; }
+  .photoBar { position: absolute; bottom: calc(20px + env(safe-area-inset-bottom)); display: flex; gap: 12px; }
+  .photoBar button, .photoBar a { background: rgba(255,255,255,.14); color: #fff; border: 0; border-radius: 999px; padding: 10px 22px; font-size: 14px; font-weight: 700; cursor: pointer; text-decoration: none; }
   #toast {
     position: fixed; left: 50%; bottom: 90px; transform: translateX(-50%) translateY(20px);
     background: #241f17; color: #f3eee3; font-size: 13px; padding: 10px 18px; border-radius: 999px;
@@ -202,9 +227,13 @@
   <div id="replyBar" class="hidden"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5v0a5.5 5.5 0 0 1-5.5 5.5H11"/></svg><span class="q" id="replyText"></span><button id="replyCancel" aria-label="Cancel reply"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
 
   <form id="composer">
+    <button id="attachBtn" class="hidden" type="button" aria-label="Attach"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg></button>
     <input id="input" placeholder="Ask Chat Boy anything…" autocomplete="off" maxlength="2000"/>
     <button id="send" type="submit" aria-label="Send"><svg viewBox="0 0 24 24" fill="none" stroke="#211806" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4 20-7Z"/></svg></button>
   </form>
+  <div id="recBar" class="hidden"><span class="recDot"></span><span id="recTime">0:00</span><button id="recCancel" class="recBtn" aria-label="Discard"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button><button id="recStop" class="recBtn" aria-label="Stop and send"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="7" width="10" height="10" rx="2"/></svg></button></div>
+  <input type="file" id="filePick" accept="image/*" hidden/>
+  <input type="file" id="camPick" accept="image/*" capture="environment" hidden/>
 
   <button id="jumpBtn" class="hidden"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg><span>New messages</span></button>
   <div id="swipeHint"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5v0a5.5 5.5 0 0 1-5.5 5.5H11"/></svg></div>
@@ -235,6 +264,17 @@
     <button class="msgBtn" id="msgSheetClose"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg> <span>Cancel</span></button>
   </div>
 </div>
+
+<div id="attachSheetWrap" class="hidden">
+  <div id="attachSheet">
+    <button class="msgBtn" id="attachGallery"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.5-3.5a2 2 0 0 0-2.8 0L6 20"/></svg> <span>Photo from gallery</span></button>
+    <button class="msgBtn" id="attachCamera"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg> <span>Take a photo</span></button>
+    <button class="msgBtn" id="attachVoice"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0"/><path d="M12 19v3"/></svg> <span>Voice note</span></button>
+    <button class="msgBtn" id="attachClose"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg> <span>Cancel</span></button>
+  </div>
+</div>
+
+<div id="photoView" class="hidden"><img id="photoImg" alt="Photo"/><div class="photoBar"><a id="photoSave" download="photo.jpg">Save</a><button id="photoClose" type="button">Close</button></div></div>
 
 <div id="toast"></div>
 <script src="/app.js"></script>

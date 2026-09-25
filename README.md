@@ -89,3 +89,5 @@ Home Screen) on iOS 16.4+. Android works straight from the browser
 - **Honest ticks** — Sent → Delivered (server ack) → Seen; failed sends keep your draft instead of eating it.
 - **App icon badge + pop sound + vibrate** on new messages.
 - **Reconnecting indicator**, **accent picker** (amber/forest/oxblood in Developer settings), **shake-to-lock**, **tap any quote to jump to the original**.
+- **Photos** — gallery or camera, auto-compressed, E2E-encrypted, fullscreen viewer with save. Same wipe rules as text.
+- **Voice notes** — one-tap record (120s max), custom player, E2E-encrypted, same wipe rules as text.

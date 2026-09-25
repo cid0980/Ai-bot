@@ -33,6 +33,8 @@ const S = {
   online: 1,
   editingId: null,     // message id currently being revised in the composer
   lastDayStart: null,  // day-divider tracker
+  blobUrls: new Set(),   // decrypted media URLs (revoked on clear)
+  currentAudio: null,
   remoteTyping: null,  // friend's typing bubble element
   remoteTypingTimer: null,
 };
@@ -127,6 +129,8 @@ function pop() {
   } catch {}
 }
 function buzz() { try { navigator.vibrate && navigator.vibrate(30); } catch {} }
+function stopAudio() { try { S.currentAudio && S.currentAudio.pause(); } catch {} S.currentAudio = null; }
+function clearBlobs() { try { S.blobUrls.forEach(u => URL.revokeObjectURL(u)); } catch {} S.blobUrls.clear(); }
 function paintJump() {
   const j = $('jumpBtn');
   j.classList.toggle('hidden', S.stick || !S.unread);
@@ -178,6 +182,7 @@ function botReply(q) {
 }
 
 function decoyWelcome() {
+  stopAudio(); clearBlobs();
   chat.innerHTML = '';
   bubble('Welcome to Chat Boy AI! I\'m your pocket buddy — ask me anything, anytime.');
 }
@@ -231,17 +236,7 @@ function chatBubble(id, who, text, replyTo, edited, meta) {
   const d = document.createElement('div');
   d.className = 'msg ' + who;
   d.dataset.id = id;
-  if (replyTo && replyTo.t) {
-    const q = document.createElement('div');
-    q.className = 'quote tappable';
-    q.title = 'Jump to original';
-    q.onclick = () => jumpTo(replyTo.id);
-    const b = document.createElement('b');
-    b.textContent = replyTo.mine ? 'You' : 'Friend';
-    const s = document.createElement('span');
-    s.textContent = replyTo.t.length > 120 ? replyTo.t.slice(0, 120) + '…' : replyTo.t;
-    q.appendChild(b); q.appendChild(s); d.appendChild(q);
-  }
+  appendQuote(d, replyTo);
   const span = document.createElement('span');
   span.className = 'txt';
   span.textContent = text;
@@ -271,6 +266,18 @@ async function renderMessage(m, who) {
   try {
     const p = await decryptPayload(m.iv, m.ct);
     maybeDayDivider(m.ts);
+    if (p.kind === 'img' || p.kind === 'audio') {
+      const rec = { text: p.kind === 'img' ? 'Photo' : 'Voice note', kind: p.kind, mime: p.mime,
+        dur: p.dur || 0, mine: who === 'me', replyTo: p.replyTo || null, seen: !!m.seen, acked: true, ts: m.ts, url: null };
+      try {
+        const bytes = b64d(p.data);
+        rec.url = URL.createObjectURL(new Blob([bytes], { type: p.mime || 'application/octet-stream' }));
+        S.blobUrls.add(rec.url);
+      } catch { /* undecryptable media — bubble shows a placeholder */ }
+      S.msgIndex.set(m.id, rec);
+      chatBubbleMedia(m.id, who, rec);
+      return;
+    }
     const rec = { text: p.t, mine: who === 'me', replyTo: p.replyTo || null, seen: !!m.seen, acked: true, ts: m.ts };
     S.msgIndex.set(m.id, rec);
     chatBubble(m.id, who, p.t, p.replyTo || null, !!m.edited, rec);
@@ -321,6 +328,7 @@ function connect() {
     if (m.type === 'history' && Array.isArray(m.messages)) {
       chat.innerHTML = '';
       hideRemoteTyping();
+      stopAudio(); clearBlobs();
       S.msgIndex.clear();
       S.lastDayStart = null;
       S.unread = 0; S.stick = true; paintJump();
@@ -399,6 +407,7 @@ async function unlock(secret) {
   $('sessInfo').classList.remove('hidden');
   $('sheetWrap').classList.add('hidden');
   chips.classList.add('hidden');
+  $('attachBtn').classList.remove('hidden');
   input.placeholder = 'Message…';
   chat.innerHTML = '';
   sys('Pro connected ✓  Code: ' + code + ' — swipe right to reply, long-press a message for more');
@@ -422,6 +431,7 @@ function lock(msg) {
   S.ws = null;
   clearTimeout(S.idleTimer);
   chips.classList.remove('hidden');
+  $('attachBtn').classList.add('hidden');
   input.placeholder = 'Ask Chat Boy anything…';
   setStatus(); decoyWelcome();
   if (msg) toast(msg);
@@ -596,7 +606,8 @@ function openMsgSheet(id) {
   if (!rec || !S.unlocked) return;
   sheetId = id;
   $('msgSheetPreview').textContent = (rec.mine ? 'You: ' : 'Friend: ') + rec.text.slice(0, 80);
-  $('msgEdit').style.display = rec.mine ? '' : 'none'; // edit: own messages only
+  $('msgEdit').style.display = (rec.mine && !rec.kind) ? '' : 'none'; // edit: own text only
+  $('msgCopy').style.display = rec.kind ? 'none' : '';
   $('msgSheetWrap').classList.remove('hidden');
 }
 function closeMsgSheet() { $('msgSheetWrap').classList.add('hidden'); sheetId = null; }
@@ -681,7 +692,7 @@ chat.addEventListener('contextmenu', e => {
 // ── Inline edit (Instagram-style: revise right in the composer, no popups) ──
 function startEdit(id) {
   const rec = S.msgIndex.get(id);
-  if (!rec || !rec.mine || !S.unlocked) return;
+  if (!rec || !rec.mine || rec.kind || !S.unlocked) return;
   cancelReply();
   S.editingId = id;
   $('editText').textContent = rec.text.length > 80 ? rec.text.slice(0, 80) + '…' : rec.text;
@@ -732,6 +743,222 @@ input.addEventListener('input', () => {
   clearTimeout(typingTimer);
   typingTimer = setTimeout(() => sendTyping(false), 2500);
 });
+
+// ── Photos + voice notes (E2E-encrypted blobs, same wipe rules as text) ──
+function appendQuote(d, replyTo) {
+  if (!replyTo || !replyTo.t) return;
+  const q = document.createElement('div');
+  q.className = 'quote tappable';
+  q.title = 'Jump to original';
+  q.onclick = () => jumpTo(replyTo.id);
+  const b = document.createElement('b');
+  b.textContent = replyTo.mine ? 'You' : 'Friend';
+  const s = document.createElement('span');
+  s.textContent = replyTo.t.length > 120 ? replyTo.t.slice(0, 120) + '…' : replyTo.t;
+  q.appendChild(b); q.appendChild(s); d.appendChild(q);
+}
+function b64eBytes(u8) {
+  let s = '';
+  for (let i = 0; i < u8.length; i += 8192) s += String.fromCharCode.apply(null, u8.subarray(i, i + 8192));
+  return btoa(s);
+}
+function fmtDur(s) {
+  s = Math.max(0, Math.round(s || 0));
+  return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+}
+function chatBubbleMedia(id, who, rec) {
+  const d = document.createElement('div');
+  d.className = 'msg ' + who + ' media';
+  d.dataset.id = id;
+  appendQuote(d, rec.replyTo);
+  if (rec.kind === 'img') {
+    if (rec.url) {
+      const im = document.createElement('img');
+      im.className = 'mediaImg';
+      im.src = rec.url;
+      im.alt = 'Photo';
+      im.onclick = () => openPhoto(rec.url);
+      d.appendChild(im);
+    } else {
+      const s = document.createElement('span');
+      s.className = 'txt';
+      s.textContent = 'Photo unavailable';
+      d.appendChild(s);
+    }
+  } else {
+    d.appendChild(buildPlayer(rec));
+  }
+  if (who === 'me') {
+    const el = document.createElement('span');
+    el.className = 'seenMark' + (rec.seen ? ' isSeen' : '');
+    d.appendChild(el);
+    paintStatus(d, rec);
+  } else if (rec.ts) {
+    const el = document.createElement('span');
+    el.className = 'timeMark';
+    el.textContent = fmtTime(rec.ts);
+    d.appendChild(el);
+  }
+  chat.appendChild(d);
+}
+function buildPlayer(rec) {
+  const wrap = document.createElement('div');
+  wrap.className = 'aud';
+  const btn = document.createElement('button');
+  btn.className = 'audPlay';
+  btn.setAttribute('aria-label', 'Play voice note');
+  btn.innerHTML = ICON.play;
+  const bar = document.createElement('div');
+  bar.className = 'audBar';
+  const fill = document.createElement('div');
+  fill.className = 'audFill';
+  bar.appendChild(fill);
+  const time = document.createElement('span');
+  time.className = 'audTime';
+  time.textContent = fmtDur(0) + ' / ' + fmtDur(rec.dur);
+  wrap.appendChild(btn); wrap.appendChild(bar); wrap.appendChild(time);
+  let audio = null;
+  btn.onclick = () => {
+    if (!rec.url) return;
+    if (!audio) {
+      audio = new Audio(rec.url);
+      audio.onpause = () => { btn.innerHTML = ICON.play; };
+      audio.onended = () => {
+        btn.innerHTML = ICON.play;
+        fill.style.width = '0%';
+        time.textContent = fmtDur(0) + ' / ' + fmtDur(rec.dur);
+        if (S.currentAudio === audio) S.currentAudio = null;
+      };
+      audio.ontimeupdate = () => {
+        const du = audio.duration || rec.dur || 1;
+        fill.style.width = Math.min(100, (audio.currentTime / du) * 100) + '%';
+        time.textContent = fmtDur(audio.currentTime) + ' / ' + fmtDur(du);
+      };
+    }
+    if (audio.paused) {
+      if (S.currentAudio && S.currentAudio !== audio) S.currentAudio.pause();
+      S.currentAudio = audio;
+      audio.play().catch(() => {});
+      btn.innerHTML = ICON.pause;
+    } else {
+      audio.pause();
+    }
+  };
+  return wrap;
+}
+function fileToJpeg(file, maxDim = 1280, q = 0.82) {
+  return new Promise((res, rej) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      let w = img.width, h = img.height;
+      const sc = Math.min(1, maxDim / Math.max(w, h));
+      w = Math.round(w * sc); h = Math.round(h * sc);
+      const cv = document.createElement('canvas');
+      cv.width = w; cv.height = h;
+      cv.getContext('2d').drawImage(img, 0, 0, w, h);
+      cv.toBlob(b => b ? res(b) : rej(new Error('encode')), 'image/jpeg', q);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); rej(new Error('decode')); };
+    img.src = url;
+  });
+}
+async function sendMedia(kind, blob, meta = {}) {
+  if (!S.unlocked) return;
+  if (!S.ws || S.ws.readyState !== 1) return toast('Reconnecting… try again in a sec');
+  if (blob.size > 2000000) return toast('File too large (2 MB max)');
+  try {
+    const buf = await blob.arrayBuffer();
+    const payload = { kind, mime: blob.type || meta.mime || 'application/octet-stream', data: b64eBytes(new Uint8Array(buf)) };
+    if (meta.dur) payload.dur = meta.dur;
+    if (S.replyTo) payload.replyTo = { id: S.replyTo.id, t: S.replyTo.t, mine: S.replyTo.mine };
+    const { iv, ct } = await encryptPayload(payload);
+    if (ct.length > 2800000) return toast('File too large after encryption');
+    const id = (crypto.randomUUID ? crypto.randomUUID() : 'm' + Date.now().toString(36) + Math.random().toString(36).slice(2));
+    S.ws.send(JSON.stringify({ type: 'msg', id, iv, ct, kind }));
+    const url = URL.createObjectURL(blob);
+    S.blobUrls.add(url);
+    const rec = { text: kind === 'img' ? 'Photo' : 'Voice note', kind, mine: true,
+      replyTo: payload.replyTo || null, seen: false, acked: false, ts: Date.now(), url, dur: meta.dur || 0 };
+    S.msgIndex.set(id, rec);
+    maybeDayDivider(rec.ts);
+    chatBubbleMedia(id, 'me', rec);
+    cancelReply();
+    clearTimeout(typingTimer); sendTyping(false);
+    pokeIdle();
+    S.stick = true; S.unread = 0; paintJump(); scrollDown();
+  } catch { toast('Send failed'); }
+}
+async function sendPhotoFile(file) {
+  if (!file || !file.type.startsWith('image/')) return toast('Not an image');
+  try {
+    await sendMedia('img', await fileToJpeg(file));
+  } catch { toast('Could not read that photo'); }
+}
+// ── attach sheet ──
+function openAttach() { if (S.unlocked) $('attachSheetWrap').classList.remove('hidden'); }
+function closeAttach() { $('attachSheetWrap').classList.add('hidden'); }
+$('attachBtn').onclick = openAttach;
+$('attachClose').onclick = closeAttach;
+$('attachSheetWrap').addEventListener('click', e => { if (e.target.id === 'attachSheetWrap') closeAttach(); });
+$('attachGallery').onclick = () => { closeAttach(); $('filePick').click(); };
+$('attachCamera').onclick = () => { closeAttach(); $('camPick').click(); };
+$('attachVoice').onclick = () => { closeAttach(); startVoice(); };
+$('filePick').onchange = e => { const f = e.target.files[0]; e.target.value = ''; if (f) sendPhotoFile(f); };
+$('camPick').onchange = e => { const f = e.target.files[0]; e.target.value = ''; if (f) sendPhotoFile(f); };
+// ── voice recorder ──
+let MR = null, MRchunks = [], MRtimer = null, MRstart = 0, MRstream = null, MRmime = '', MRdiscard = false;
+async function startVoice() {
+  if (!S.unlocked || MR) return;
+  let stream;
+  try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
+  catch { return toast('Microphone blocked'); }
+  MRstream = stream;
+  MRmime = (window.MediaRecorder && ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'].find(t => MediaRecorder.isTypeSupported(t))) || '';
+  try { MR = MRmime ? new MediaRecorder(stream, { mimeType: MRmime }) : new MediaRecorder(stream); }
+  catch { stream.getTracks().forEach(t => t.stop()); MRstream = null; return toast('Recording not supported'); }
+  if (!MRmime) MRmime = MR.mimeType || 'audio/webm';
+  MRchunks = []; MRdiscard = false;
+  MR.ondataavailable = e => { if (e.data && e.data.size) MRchunks.push(e.data); };
+  MR.onstop = onVoiceStop;
+  form.classList.add('hidden');
+  $('recBar').classList.remove('hidden');
+  MRstart = Date.now();
+  $('recTime').textContent = '0:00';
+  MRtimer = setInterval(() => {
+    const s = Math.floor((Date.now() - MRstart) / 1000);
+    $('recTime').textContent = fmtDur(s);
+    if (s >= 120 && MR) { try { MR.stop(); } catch {} }
+  }, 500);
+  MR.start();
+}
+function endVoice(discard) {
+  MRdiscard = discard;
+  clearInterval(MRtimer);
+  try { MR && MR.state !== 'inactive' && MR.stop(); } catch {}
+  if (!MR) { form.classList.remove('hidden'); $('recBar').classList.add('hidden'); }
+}
+async function onVoiceStop() {
+  form.classList.remove('hidden');
+  $('recBar').classList.add('hidden');
+  if (MRstream) { MRstream.getTracks().forEach(t => t.stop()); MRstream = null; }
+  const chunks = MRchunks, mime = MRmime, discard = MRdiscard, dur = Math.round((Date.now() - MRstart) / 1000);
+  MR = null; MRchunks = [];
+  if (discard || !chunks.length) return;
+  await sendMedia('audio', new Blob(chunks, { type: mime }), { dur, mime });
+}
+$('recCancel').onclick = () => endVoice(true);
+$('recStop').onclick = () => endVoice(false);
+// ── fullscreen photo viewer ──
+function openPhoto(url) {
+  $('photoImg').src = url;
+  $('photoSave').href = url;
+  $('photoView').classList.remove('hidden');
+}
+function closePhoto() { $('photoView').classList.add('hidden'); $('photoImg').src = ''; }
+$('photoClose').onclick = closePhoto;
+$('photoView').addEventListener('click', e => { if (e.target.id === 'photoView') closePhoto(); });
 
 // ── Composer ──
 form.addEventListener('submit', async e => {
@@ -785,6 +1012,8 @@ const ICON = {
   send: svgIcon('<path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4 20-7Z"/>'),
   check: svgIcon('<path d="M20 6 9 17l-5-5"/>'),
   chev: svgIcon('<path d="m6 9 6 6 6-6"/>'),
+  play: svgIcon('<path d="M8 5.5v13l11-6.5z"/>'),
+  pause: svgIcon('<path d="M9 5v14M15 5v14"/>'),
 };
 
 // ── Alert bar: install nudge + notification watchdog (persistent until fixed) ──
