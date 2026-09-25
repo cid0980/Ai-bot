@@ -4,6 +4,7 @@
 // Unlocked → real E2E-encrypted chat with your friend, same screen.
 // Unlock   → triple-tap the 🤖 logo, enter your shared secret as the
 //            "API key". Both sides use the SAME secret, no links needed.
+// Session  → survives refresh (sessionStorage), dies with the tab.
 // ─────────────────────────────────────────────────────────────
 'use strict';
 
@@ -24,15 +25,22 @@ const S = {
     return v;
   })(),
   idleTimer: null,
+  pushOn: localStorage.getItem('cb_push') !== 'off', // notification preference
+  msgIndex: new Map(), // id -> { text, mine, replyTo }
+  replyTo: null,       // { id, t, mine } quoted in the composer
+  stick: true,         // auto-scroll pinned to bottom?
+  unread: 0,           // new messages arrived while scrolled up
+  online: 1,
 };
 
 // ── UI helpers ──
 function scrollDown() { chat.scrollTop = chat.scrollHeight; }
-function bubble(text, who = 'bot') {
+function bubble(text, who = 'bot', stick = true) {
   const d = document.createElement('div');
   d.className = 'msg ' + who;
   d.textContent = text;
-  chat.appendChild(d); scrollDown();
+  chat.appendChild(d);
+  if (stick) scrollDown();
   return d;
 }
 function sys(text) { bubble(text, 'sys'); }
@@ -51,6 +59,21 @@ function showTyping() {
   chat.appendChild(d); scrollDown();
   return d;
 }
+function sendSeen(ids) {
+  if (!S.unlocked || !S.ws || S.ws.readyState !== 1 || !ids.length) return;
+  try { S.ws.send(JSON.stringify({ type: 'seen', ids })); } catch {}
+}
+function paintJump() {
+  const j = $('jumpBtn');
+  j.classList.toggle('hidden', S.stick || !S.unread);
+  if (S.unread) j.textContent = `↓ ${S.unread} new message${S.unread > 1 ? 's' : ''}`;
+}
+chat.addEventListener('scroll', () => {
+  S.stick = chat.scrollHeight - chat.scrollTop - chat.clientHeight < 90;
+  if (S.stick) S.unread = 0;
+  paintJump();
+}, { passive: true });
+$('jumpBtn').onclick = () => { S.stick = true; S.unread = 0; paintJump(); scrollDown(); };
 
 // ── Decoy bot brain (offline, keyword-based) ──
 const JOKES = [
@@ -120,30 +143,80 @@ async function deriveAll(secret) {
   return { key, roomId, code: code.slice(0, 4) + '-' + code.slice(4) };
 }
 
-async function encryptText(text) {
+async function encryptPayload(obj) {
   const iv = crypto.getRandomValues(new Uint8Array(12));
-  const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, S.key, enc.encode(JSON.stringify({ t: text })));
+  const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, S.key, enc.encode(JSON.stringify(obj)));
   return { iv: b64e(iv), ct: b64e(ct) };
 }
 
-async function decryptText(ivB64, ctB64) {
+async function decryptPayload(ivB64, ctB64) {
   const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: b64d(ivB64) }, S.key, b64d(ctB64));
-  return JSON.parse(dec.decode(pt)).t;
+  return JSON.parse(dec.decode(pt)); // { t, replyTo? }
 }
 
 // ── Real chat (unlocked mode) ──
 function setStatus() {
   if (!S.unlocked) { statusText.textContent = 'Always here to help'; statusDot.className = 'dot'; return; }
-  statusText.textContent = S.online === 2 ? 'Pro replies active' : 'Pro replies active';
+  statusText.textContent = 'Pro replies active';
   statusDot.className = 'dot' + (S.online === 2 ? '' : ' away');
+}
+
+// Structured chat bubble: optional quote, text, edited marker. Tracked by id.
+function chatBubble(id, who, text, replyTo, edited) {
+  const d = document.createElement('div');
+  d.className = 'msg ' + who;
+  d.dataset.id = id;
+  if (replyTo && replyTo.t) {
+    const q = document.createElement('div');
+    q.className = 'quote';
+    const b = document.createElement('b');
+    b.textContent = replyTo.mine ? 'You' : 'Friend';
+    const s = document.createElement('span');
+    s.textContent = replyTo.t.length > 120 ? replyTo.t.slice(0, 120) + '…' : replyTo.t;
+    q.appendChild(b); q.appendChild(s); d.appendChild(q);
+  }
+  const span = document.createElement('span');
+  span.className = 'txt';
+  span.textContent = text;
+  d.appendChild(span);
+  if (edited) {
+    const e = document.createElement('span');
+    e.className = 'editedMark';
+    e.textContent = '(edited)';
+    d.appendChild(e);
+  }
+  chat.appendChild(d);
+  return d;
 }
 
 async function renderMessage(m, who) {
   try {
-    bubble(await decryptText(m.iv, m.ct), who);
+    const p = await decryptPayload(m.iv, m.ct);
+    S.msgIndex.set(m.id, { text: p.t, mine: who === 'me', replyTo: p.replyTo || null });
+    chatBubble(m.id, who, p.t, p.replyTo || null, !!m.edited);
   } catch {
-    bubble('🔒 Couldn\'t decrypt — wrong secret?', 'sys');
+    bubble('🔒 Couldn\'t decrypt — wrong secret?', 'sys', false);
   }
+}
+
+// Incoming edit from the friend: swap text in place.
+async function applyEdit(m) {
+  const rec = S.msgIndex.get(m.id);
+  if (!rec) return;
+  try {
+    const p = await decryptPayload(m.iv, m.ct);
+    rec.text = p.t;
+    const sel = `.msg[data-id="${CSS.escape(m.id)}"]`;
+    const el = chat.querySelector(sel + ' .txt');
+    if (el) el.textContent = p.t;
+    const wrap = chat.querySelector(sel);
+    if (wrap && !wrap.querySelector('.editedMark')) {
+      const e = document.createElement('span');
+      e.className = 'editedMark';
+      e.textContent = '(edited)';
+      wrap.appendChild(e);
+    }
+  } catch { /* undecryptable edit — ignore */ }
 }
 
 function connect() {
@@ -157,13 +230,21 @@ function connect() {
     if (m.type === 'presence') { S.online = m.online; setStatus(); }
     if (m.type === 'history' && Array.isArray(m.messages)) {
       chat.innerHTML = '';
+      S.msgIndex.clear();
+      S.unread = 0; S.stick = true; paintJump();
       for (const msg of m.messages) await renderMessage(msg, msg.from === S.mySubId ? 'me' : 'bot');
-      if (!m.messages.length) sys('Connected. Say hi — messages vanish after everyone leaves.');
+      if (!m.messages.length) sys('Connected. Say hi — seen messages vanish after everyone leaves.');
+      scrollDown();
+      sendSeen(m.messages.map(x => x.id)); // read receipt → server may wipe these later
     }
     if (m.type === 'msg' && m.message) {
       if (m.message.from === S.mySubId) return; // our own echo from another tab
-      renderMessage(m.message, 'bot');
+      await renderMessage(m.message, 'bot');
+      if (S.stick) scrollDown();
+      else { S.unread++; paintJump(); }
+      sendSeen([m.message.id]);
     }
+    if (m.type === 'edit' && m.message) applyEdit(m.message);
   };
   ws.onclose = () => { if (S.unlocked) setTimeout(() => S.unlocked && connect(), 2000); };
   ws.onerror = () => { try { ws.close(); } catch {} };
@@ -178,6 +259,7 @@ function pokeIdle() {
 
 async function unlock(secret) {
   const { key, roomId, code } = await deriveAll(secret);
+  try { sessionStorage.setItem('cb_secret', secret); } catch {} // refresh-safe, dies with tab
   S.key = key; S.roomId = roomId; S.unlocked = true;
   $('sessCode').textContent = code;
   $('sessInfo').classList.remove('hidden');
@@ -186,7 +268,7 @@ async function unlock(secret) {
   chips.classList.add('hidden');
   input.placeholder = 'Message…';
   chat.innerHTML = '';
-  sys('Pro connected ✓  Code: ' + code);
+  sys('Pro connected ✓  Code: ' + code + ' — swipe to reply, long-press yours to edit');
   setStatus(); connect(); pokeIdle();
   await ensurePush(); // needs roomId, so it happens here
   toast('Pro replies enabled');
@@ -194,6 +276,10 @@ async function unlock(secret) {
 
 function lock(msg) {
   S.unlocked = false; S.key = null; S.roomId = null;
+  try { sessionStorage.removeItem('cb_secret'); } catch {}
+  S.msgIndex.clear();
+  cancelReply();
+  S.unread = 0; S.stick = true; paintJump();
   try { S.ws && S.ws.close(); } catch {}
   S.ws = null;
   clearTimeout(S.idleTimer);
@@ -257,25 +343,134 @@ $('connectBtn').onclick = async () => {
   $('connectBtn').textContent = 'Connect';
   $('apiKey').value = ''; // don't leave the secret in the DOM
 };
-
-lockBtn.onclick = async () => {
+$('testPushBtn').onclick = async () => {
+  if (!S.unlocked) return;
   try {
-    await fetch('/api/unsubscribe', {
+    const r = await fetch('/api/test-push', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ roomId: S.roomId, subId: S.mySubId }),
+      body: JSON.stringify({ roomId: S.roomId }),
     });
-  } catch {}
-  lock('Session ended.');
+    const j = await r.json();
+    toast(j.ok ? `Test sent to ${j.targets} device(s) — check notifications` : 'Test failed');
+  } catch { toast('Test failed'); }
 };
+
+lockBtn.onclick = () => lock('Session ended.');
+// Note: locking does NOT unsubscribe — notifications keep working while hidden.
+// Only the 🔔 toggle below (or browser settings) stops them.
+
+function paintBell() { $('bellBtn').textContent = S.pushOn ? '🔔' : '🔕'; }
 
 $('bellBtn').onclick = async () => {
   if (!('Notification' in window)) return toast('Notifications not supported here');
-  if (Notification.permission === 'granted') return toast('Reply notifications are on 🔔');
-  if (await Notification.requestPermission() === 'granted') {
+  if (Notification.permission !== 'granted') {
+    if (await Notification.requestPermission() === 'granted') {
+      S.pushOn = true; localStorage.setItem('cb_push', 'on'); paintBell();
+      toast('Reply notifications are on 🔔');
+      if (S.unlocked) ensurePush();
+    } else toast('Notifications blocked in browser settings');
+    return;
+  }
+  // Permission granted → bell is a real on/off switch.
+  S.pushOn = !S.pushOn;
+  localStorage.setItem('cb_push', S.pushOn ? 'on' : 'off');
+  paintBell();
+  if (S.pushOn) {
+    if (S.unlocked) await ensurePush();
     toast('Reply notifications are on 🔔');
-    if (S.unlocked) ensurePush();
-  } else toast('Notifications blocked in browser settings');
+  } else {
+    try {
+      if (S.unlocked) {
+        await fetch('/api/unsubscribe', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ roomId: S.roomId, subId: S.mySubId }),
+        });
+      }
+    } catch {}
+    toast('Reply notifications are off 🔕');
+  }
 };
+
+// ── Reply (swipe a bubble / double-click) ──
+function setReply(id) {
+  const rec = S.msgIndex.get(id);
+  if (!rec || !S.unlocked) return;
+  S.replyTo = { id, t: rec.text, mine: rec.mine };
+  $('replyText').textContent = `${rec.mine ? 'You' : 'Friend'}: ${rec.text}`;
+  $('replyBar').classList.remove('hidden');
+  input.focus();
+}
+function cancelReply() {
+  S.replyTo = null;
+  $('replyBar').classList.add('hidden');
+}
+$('replyCancel').onclick = cancelReply;
+
+// Swipe left/right to reply, long-press own message to edit (touch)…
+let gX = 0, gY = 0, gEl = null, gLong = null, gLongFired = false;
+chat.addEventListener('touchstart', e => {
+  if (!S.unlocked) return;
+  const b = e.target.closest('.msg[data-id]');
+  if (!b) return;
+  const t = e.touches[0];
+  gX = t.clientX; gY = t.clientY; gEl = b; gLongFired = false;
+  clearTimeout(gLong);
+  if (b.classList.contains('me')) {
+    gLong = setTimeout(() => {
+      gLongFired = true;
+      if (navigator.vibrate) navigator.vibrate(25);
+      startEdit(b.dataset.id);
+    }, 550);
+  }
+}, { passive: true });
+chat.addEventListener('touchmove', e => {
+  if (!gEl) return;
+  const t = e.touches[0];
+  if (Math.abs(t.clientX - gX) + Math.abs(t.clientY - gY) > 12) clearTimeout(gLong);
+}, { passive: true });
+chat.addEventListener('touchend', e => {
+  clearTimeout(gLong);
+  if (!S.unlocked || gLongFired || !gEl) { gEl = null; return; }
+  const t = e.changedTouches[0];
+  const dx = t.clientX - gX, dy = t.clientY - gY;
+  if (Math.abs(dx) > 60 && Math.abs(dy) < 50) setReply(gEl.dataset.id);
+  gEl = null;
+}, { passive: true });
+// …double-click does the same on desktop.
+chat.addEventListener('dblclick', e => {
+  const b = e.target.closest('.msg[data-id]');
+  if (!b || !S.unlocked) return;
+  if (b.classList.contains('me')) startEdit(b.dataset.id);
+  else setReply(b.dataset.id);
+});
+
+// ── Edit own message ──
+async function startEdit(id) {
+  const rec = S.msgIndex.get(id);
+  if (!rec || !rec.mine || !S.unlocked) return;
+  const v = prompt('Edit message', rec.text);
+  if (v === null) return;
+  const text = v.trim();
+  if (!text || text === rec.text) return;
+  try {
+    const payload = { t: text };
+    if (rec.replyTo) payload.replyTo = rec.replyTo;
+    const { iv, ct } = await encryptPayload(payload);
+    if (S.ws && S.ws.readyState === 1) S.ws.send(JSON.stringify({ type: 'edit', id, iv, ct }));
+    rec.text = text; // optimistic update
+    const wrap = chat.querySelector(`.msg[data-id="${CSS.escape(id)}"]`);
+    if (wrap) {
+      const t = wrap.querySelector('.txt');
+      if (t) t.textContent = text;
+      if (!wrap.querySelector('.editedMark')) {
+        const e = document.createElement('span');
+        e.className = 'editedMark';
+        e.textContent = '(edited)';
+        wrap.appendChild(e);
+      }
+    }
+  } catch { toast('Edit failed'); }
+}
 
 // ── Composer ──
 form.addEventListener('submit', async e => {
@@ -285,12 +480,18 @@ form.addEventListener('submit', async e => {
   input.value = '';
   pokeIdle();
   if (!S.unlocked) { bubble(text, 'me'); decoyAnswer(text); return; }
-  // Real (encrypted) send
+  // Real (encrypted) send — client-generated id so we can render + edit instantly.
   try {
-    const { iv, ct } = await encryptText(text);
+    const payload = { t: text };
+    if (S.replyTo) payload.replyTo = { id: S.replyTo.id, t: S.replyTo.t, mine: S.replyTo.mine };
+    const { iv, ct } = await encryptPayload(payload);
     if (S.ws && S.ws.readyState === 1) {
-      S.ws.send(JSON.stringify({ type: 'msg', iv, ct }));
-      bubble(text, 'me');
+      const id = (crypto.randomUUID ? crypto.randomUUID() : 'm' + Date.now().toString(36) + Math.random().toString(36).slice(2));
+      S.ws.send(JSON.stringify({ type: 'msg', id, iv, ct }));
+      S.msgIndex.set(id, { text, mine: true, replyTo: payload.replyTo || null });
+      chatBubble(id, 'me', text, payload.replyTo || null, false);
+      cancelReply();
+      S.stick = true; S.unread = 0; paintJump(); scrollDown();
     } else toast('Reconnecting… try again in a sec');
   } catch { toast('Send failed'); }
 });
@@ -301,8 +502,28 @@ chips.addEventListener('click', e => {
   bubble(q, 'me'); decoyAnswer(q);
 });
 
+// ── Theme (dark / light) ──
+function applyTheme(t) {
+  document.documentElement.dataset.theme = t;
+  try { localStorage.setItem('cb_theme', t); } catch {}
+  $('themeBtn').textContent = t === 'light' ? '☀️' : '🌙';
+}
+$('themeBtn').onclick = () => {
+  applyTheme(document.documentElement.dataset.theme === 'light' ? 'dark' : 'light');
+};
+
 // ── Boot ──
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+applyTheme(localStorage.getItem('cb_theme') || 'dark');
 decoyWelcome();
 setStatus();
 paintBell();
+
+// Refresh-safe session: the tab remembers the secret until it is closed.
+// (New tab / closed tab = locked again. Nothing is written to disk.)
+const savedSecret = sessionStorage.getItem('cb_secret');
+if (savedSecret) {
+  unlock(savedSecret)
+    .then(() => toast('Session restored'))
+    .catch(() => sessionStorage.removeItem('cb_secret'));
+}

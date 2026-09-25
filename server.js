@@ -1,8 +1,9 @@
 // ─────────────────────────────────────────────────────────────
 // Chat Boy AI — server
 // A relay that can NEVER read the chat: it only ever sees room IDs
-// (a hash) and AES-encrypted blobs. Messages live in RAM only and
-// the room is wiped ~30s after the last person leaves.
+// (a hash) and AES-encrypted blobs. Messages live in RAM only; seen
+// messages are wiped ~30s after everyone leaves, unread ones expire
+// after 24h, and a restart wipes everything instantly.
 // ─────────────────────────────────────────────────────────────
 import express from 'express';
 import { WebSocketServer } from 'ws';
@@ -16,10 +17,16 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA = path.join(__dirname, 'data');
 fs.mkdirSync(DATA, { recursive: true });
 
-// ── VAPID keys for Web Push (auto-generated once, then reused) ──
+// ── VAPID keys for Web Push.
+// On hosts with ephemeral disks (Render free), keys MUST come from env vars —
+// otherwise every restart generates new keys and kills existing subscriptions.
+// Locally / on a VPS, they're auto-generated once and stored in data/vapid.json.
 const vapidPath = path.join(DATA, 'vapid.json');
 let vapid;
-if (fs.existsSync(vapidPath)) {
+if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
+  vapid = { publicKey: process.env.VAPID_PUBLIC_KEY, privateKey: process.env.VAPID_PRIVATE_KEY };
+  console.log('Using VAPID keys from environment');
+} else if (fs.existsSync(vapidPath)) {
   vapid = JSON.parse(fs.readFileSync(vapidPath, 'utf8'));
 } else {
   vapid = webpush.generateVAPIDKeys();
@@ -41,7 +48,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 app.get('/api/vapid-public-key', (req, res) => res.json({ key: vapid.publicKey }));
 
-// Health check (Render + UptimeRobot keep-alive pings this)
+// Health check (Render + cron-job.org keep-alive pings this)
 app.get('/api/health', (req, res) => res.json({ ok: true, rooms: rooms.size }));
 
 app.post('/api/subscribe', (req, res) => {
@@ -52,6 +59,7 @@ app.post('/api/subscribe', (req, res) => {
   subs[roomId] = (subs[roomId] || []).filter(s => s.subId !== subId);
   subs[roomId].push({ subId, subscription });
   saveSubs();
+  console.log(`[push] subscribed ${subId.slice(0, 6)}… to room ${roomId.slice(0, 8)}… (${subs[roomId].length} device(s))`);
   res.json({ ok: true });
 });
 
@@ -60,6 +68,15 @@ app.post('/api/unsubscribe', (req, res) => {
   if (subs[roomId]) subs[roomId] = subs[roomId].filter(s => s.subId !== subId);
   saveSubs();
   res.json({ ok: true });
+});
+
+// Sends a real push to EVERY subscription in the room (including the sender)
+// so users can verify notifications work. Generic text only, like all pushes.
+app.post('/api/test-push', async (req, res) => {
+  const { roomId } = req.body || {};
+  if (!roomId || !/^[a-f0-9]{64}$/.test(roomId)) return res.status(400).json({ error: 'bad request' });
+  await notifyRoom(roomId, '__nobody__');
+  res.json({ ok: true, targets: (subs[roomId] || []).length });
 });
 
 const PORT = process.env.PORT || 3000;
@@ -94,14 +111,19 @@ function broadcastPresence(roomId) {
 // Deliberately generic: no sender, no content — just "something happened".
 async function notifyRoom(roomId, exceptSubId) {
   const list = subs[roomId] || [];
+  if (!list.length) { console.log(`[push] room ${roomId.slice(0, 8)}… has no subscriptions, skipped`); return; }
   const payload = JSON.stringify({ title: 'Chat Boy AI', body: 'You have a new notification' });
   for (const s of list) {
     if (s.subId === exceptSubId) continue;
     try {
       await webpush.sendNotification(s.subscription, payload);
+      console.log(`[push] sent to ${s.subId.slice(0, 6)}… in room ${roomId.slice(0, 8)}…`);
     } catch (e) {
-      // Subscription dead (app uninstalled / permission revoked) — drop it.
-      if (e.statusCode === 404 || e.statusCode === 410) {
+      console.warn(`[push] FAILED to ${s.subId.slice(0, 6)}… status=${e.statusCode} ${e.body || e.message || ''}`);
+      // 403 = keys rotated or revoked, 404/410 = subscription dead. All three
+      // mean "will never work again" — drop it; the client re-subscribes
+      // automatically on every unlock.
+      if ([403, 404, 410].includes(e.statusCode)) {
         subs[roomId] = subs[roomId].filter(x => x.subId !== s.subId);
         saveSubs();
       }
@@ -118,6 +140,7 @@ wss.on('connection', (ws, req) => {
   const r = getRoom(roomId);
   if (r.wipeTimer) { clearTimeout(r.wipeTimer); r.wipeTimer = null; } // someone's back — cancel wipe
   r.clients.add(ws);
+  sweep(r);
 
   ws.send(JSON.stringify({ type: 'history', messages: r.messages }));
   broadcastPresence(roomId);
@@ -125,8 +148,28 @@ wss.on('connection', (ws, req) => {
   ws.on('message', raw => {
     let m;
     try { m = JSON.parse(raw.toString()); } catch { return; }
+    // Read receipt: client confirms it rendered these messages.
+    if (m.type === 'seen' && Array.isArray(m.ids)) {
+      for (const msg of r.messages) {
+        if (m.ids.includes(msg.id) && !msg.seenBy.includes(subId)) msg.seenBy.push(subId);
+      }
+      return;
+    }
+    // Edit: only the original sender may edit (basic from-match guard).
+    if (m.type === 'edit' && typeof m.id === 'string' && typeof m.iv === 'string' && typeof m.ct === 'string' && m.ct.length <= 20000) {
+      const msg = r.messages.find(x => x.id === m.id);
+      if (msg && msg.from === subId) {
+        msg.iv = m.iv; msg.ct = m.ct; msg.edited = true;
+        for (const c of r.clients) {
+          if (c !== ws && c.readyState === 1) c.send(JSON.stringify({ type: 'edit', message: msg }));
+        }
+      }
+      return;
+    }
     if (m.type === 'msg' && typeof m.iv === 'string' && typeof m.ct === 'string' && m.ct.length <= 20000) {
-      const msg = { id: crypto.randomUUID(), from: subId, iv: m.iv, ct: m.ct, ts: Date.now() };
+      // Client-generated id (lets the sender render + edit instantly).
+      const id = (typeof m.id === 'string' && /^[A-Za-z0-9-]{8,64}$/.test(m.id)) ? m.id : crypto.randomUUID();
+      const msg = { id, from: subId, iv: m.iv, ct: m.ct, ts: Date.now(), seenBy: [] };
       r.messages.push(msg);
       if (r.messages.length > 200) r.messages = r.messages.slice(-200);
       for (const c of r.clients) {
@@ -141,8 +184,13 @@ wss.on('connection', (ws, req) => {
     broadcastPresence(roomId);
     if (r.clients.size === 0) {
       // Everybody left (closed the app). 30s grace covers accidental
-      // refreshes — then the room and its messages are gone forever.
-      r.wipeTimer = setTimeout(() => rooms.delete(roomId), 30_000);
+      // refreshes — then messages everyone has SEEN are gone forever.
+      // Unread messages stay, waiting for the other person (max 24h).
+      r.wipeTimer = setTimeout(() => {
+        sweep(r);
+        r.messages = r.messages.filter(msg => !msg.seenBy.some(s => s !== msg.from));
+        if (r.messages.length === 0) rooms.delete(roomId);
+      }, 30_000);
     }
   });
 });

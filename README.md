@@ -66,3 +66,17 @@ Home Screen) on iOS 16.4+. Android works straight from the browser
   the content.
 - No protection against someone physically holding your unlocked phone, or a
   compromised browser. Lock (🔒) when done.
+
+## Features
+
+- 🔔 **Push that survives closes** — generic *"You have a new notification"* (no names,
+  no content). Tapping it opens the locked decoy. 🔔 bell is an on/off switch;
+  🔒 locking never stops notifications. A "Send test notification" button in
+  Developer settings verifies it end-to-end.
+- 🔄 **Refresh-safe session** — the tab remembers the secret until closed, so a
+  refresh reconnects instantly. New/closed tab = locked again.
+- ✏️ **Edit** — long-press your message (or double-click on desktop).
+- ↩️ **Reply** — swipe any bubble left/right (or double-click on desktop).
+- ⬇️ **Smart auto-scroll** — sticks to bottom while chatting; a "↓ New messages"
+  pill appears when you're reading history.
+- 🌙☀️ **Dark / light themes** — toggle in the header, remembered per device.
