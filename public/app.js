@@ -74,7 +74,7 @@ function sendSeen(ids) {
 function paintJump() {
   const j = $('jumpBtn');
   j.classList.toggle('hidden', S.stick || !S.unread);
-  if (S.unread) j.textContent = `↓ ${S.unread} new message${S.unread > 1 ? 's' : ''}`;
+  if (S.unread) j.innerHTML = ICON.chev + '<span>' + S.unread + ' new message' + (S.unread > 1 ? 's' : '') + '</span>';
 }
 chat.addEventListener('scroll', () => {
   S.stick = chat.scrollHeight - chat.scrollTop - chat.clientHeight < 90;
@@ -110,7 +110,7 @@ function botReply(q) {
   if (/(joke|funny|laugh)/.test(t)) return pick(JOKES);
   if (/(fact|did you know)/.test(t)) return pick(FACTS);
   if (/(who are you|your name|about you)/.test(t)) return 'I\'m Chat Boy, your pocket AI buddy! 🤖 Ask me anything — jokes, facts, advice, you name it.';
-  if (/(what can you do|help|features)/.test(t)) return 'I can chat, crack jokes 😂, share fun facts 🧠, and keep you company. Try the suggestions below! (Tip: enable 🔔 notifications so you never miss my replies.)';
+  if (/(what can you do|help|features)/.test(t)) return 'I can chat, crack jokes 😂, share fun facts 🧠, and keep you company. Try the suggestions below! (Tip: tap the bell icon, top right, so you never miss my replies.)';
   if (/\btime\b/.test(t)) return 'It\'s ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' right now. ⏰';
   if (/\b(date|day|today)\b/.test(t)) return 'Today is ' + new Date().toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' }) + '. 📅';
   if (/(thank|thanks|thx)/.test(t)) return 'Anytime! That\'s what I\'m here for. 😊';
@@ -122,7 +122,7 @@ function botReply(q) {
 
 function decoyWelcome() {
   chat.innerHTML = '';
-  bubble('👋 Welcome to Chat Boy AI! I\'m your pocket buddy — ask me anything, anytime.');
+  bubble('Welcome to Chat Boy AI! I\'m your pocket buddy — ask me anything, anytime.');
 }
 
 function decoyAnswer(q) {
@@ -335,7 +335,7 @@ async function ensurePush() {
     if (Notification.permission === 'denied') return;
     if (Notification.permission === 'default') {
       // Asked in decoy language — "AI reply" notifications.
-      toast('Enable notifications to get my replies 🔔');
+      toast('Enable notifications to get my replies');
       if (await Notification.requestPermission() !== 'granted') return;
     }
     const reg = await navigator.serviceWorker.ready;
@@ -399,29 +399,29 @@ $('testPushBtn').onclick = async () => {
 // 🔒 single-tap while unlocked = lock. Triple-tap while locked = quick rejoin.
 let lockTaps = [];
 lockBtn.onclick = () => {
-  if (S.unlocked) { lock('Locked — triple-tap 🔒 to jump back in'); return; }
+  if (S.unlocked) { lock('Locked — triple-tap the lock icon to jump back in'); return; }
   const now = Date.now();
   lockTaps = lockTaps.filter(t => now - t < 1000);
   lockTaps.push(now);
-  if (lockTaps.length === 1) toast('🔒 Locked');
+  if (lockTaps.length === 1) toast('Locked');
   if (lockTaps.length < 3) return;
   lockTaps = [];
   let secret = null;
   try { secret = sessionStorage.getItem('cb_secret'); } catch {}
-  if (secret) unlock(secret).then(() => toast('Welcome back ✓')).catch(() => toast('Could not rejoin'));
+  if (secret) unlock(secret).then(() => toast('Welcome back')).catch(() => toast('Could not rejoin'));
   else { $('sheetWrap').classList.remove('hidden'); setTimeout(() => $('apiKey').focus(), 100); } // fresh tab → normal unlock
 };
 // Note: locking does NOT unsubscribe — notifications keep working while hidden.
 // Only the 🔔 toggle below (or browser settings) stops them.
 
-function paintBell() { $('bellBtn').textContent = S.pushOn ? '🔔' : '🔕'; }
+function paintBell() { $('bellBtn').innerHTML = S.pushOn ? ICON.bell : ICON.bellOff; }
 
 $('bellBtn').onclick = async () => {
   if (!('Notification' in window)) return toast('Notifications not supported here');
   if (Notification.permission !== 'granted') {
     if (await Notification.requestPermission() === 'granted') {
       S.pushOn = true; localStorage.setItem('cb_push', 'on'); paintBell();
-      toast('Reply notifications are on 🔔');
+      toast('Reply notifications are on');
       if (S.unlocked) ensurePush();
     } else toast('Notifications blocked in browser settings');
     return;
@@ -432,7 +432,7 @@ $('bellBtn').onclick = async () => {
   paintBell();
   if (S.pushOn) {
     if (S.unlocked) await ensurePush();
-    toast('Reply notifications are on 🔔');
+    toast('Reply notifications are on');
   } else {
     try {
       if (S.unlocked) {
@@ -442,7 +442,7 @@ $('bellBtn').onclick = async () => {
         });
       }
     } catch {}
-    toast('Reply notifications are off 🔕');
+    toast('Reply notifications are off');
   }
 };
 
@@ -560,7 +560,7 @@ function startEdit(id) {
   $('editText').textContent = rec.text.length > 80 ? rec.text.slice(0, 80) + '…' : rec.text;
   $('editBar').classList.remove('hidden');
   input.value = rec.text;
-  $('send').textContent = '✓';
+  $('send').innerHTML = ICON.check;
   input.focus();
 }
 async function commitEdit(id, text) {
@@ -587,7 +587,7 @@ function cancelEdit() {
   S.editingId = null;
   $('editBar').classList.add('hidden');
   input.value = '';
-  $('send').textContent = '➤';
+  $('send').innerHTML = ICON.send;
 }
 $('editCancel').onclick = cancelEdit;
 
@@ -617,7 +617,7 @@ form.addEventListener('submit', async e => {
     const id = S.editingId;
     cancelEdit();
     clearTimeout(typingTimer); sendTyping(false);
-    try { await commitEdit(id, text); toast('Edited ✓'); }
+    try { await commitEdit(id, text); toast('Edited'); }
     catch { toast('Edit failed'); }
     return;
   }
@@ -645,11 +645,24 @@ chips.addEventListener('click', e => {
   bubble(q, 'me'); decoyAnswer(q);
 });
 
+// ── Inline SVG icon set (Lucide-style strokes — no emoji in the chrome) ──
+const SVGW = 'viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"';
+const svgIcon = inner => `<svg ${SVGW} aria-hidden="true">${inner}</svg>`;
+const ICON = {
+  moon: svgIcon('<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>'),
+  sun: svgIcon('<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>'),
+  bell: svgIcon('<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>'),
+  bellOff: svgIcon('<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/><path d="m2 2 20 20"/>'),
+  send: svgIcon('<path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4 20-7Z"/>'),
+  check: svgIcon('<path d="M20 6 9 17l-5-5"/>'),
+  chev: svgIcon('<path d="m6 9 6 6 6-6"/>'),
+};
+
 // ── Theme (dark / light) ──
 function applyTheme(t) {
   document.documentElement.dataset.theme = t;
   try { localStorage.setItem('cb_theme', t); } catch {}
-  $('themeBtn').textContent = t === 'light' ? '☀️' : '🌙';
+  $('themeBtn').innerHTML = t === 'light' ? ICON.sun : ICON.moon;
 }
 $('themeBtn').onclick = () => {
   applyTheme(document.documentElement.dataset.theme === 'light' ? 'dark' : 'light');

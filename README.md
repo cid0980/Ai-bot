@@ -82,3 +82,4 @@ Home Screen) on iOS 16.4+. Android works straight from the browser
 - 🌙☀️ **Dark / light themes** — toggle in the header, remembered per device.
 - 🔒 **Quick rejoin** — the 🔒 button stays in the header. Single-tap to lock, triple-tap it to jump straight back into the same room (the tab remembers the secret until closed).
 - ✓✓ **Seen receipts** — your messages show *✓ Sent*, flipping to *Seen ✓✓* the moment your friend reads them — synced even if you were offline when they read it.
+- **Clean icon set** — Lucide-style SVG icons and a self-hosted Inter font. No emoji buttons.

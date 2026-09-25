@@ -8,6 +8,7 @@
 <link rel="manifest" href="/manifest.webmanifest"/>
 <link rel="icon" href="/icon.svg"/>
 <style>
+  @font-face { font-family: 'Inter'; font-style: normal; font-weight: 100 900; font-display: swap; src: url('/fonts/inter-var.woff2') format('woff2'); }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   :root {
     --bg: #0b1220; --glow: #16244a; --panel: #111c33; --bubble-bot: #1a2745; --bubble-me: #2563eb;
@@ -23,7 +24,8 @@
   body {
     background: radial-gradient(120% 90% at 50% 0%, var(--glow) 0%, var(--bg) 60%);
     color: var(--text);
-    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font-family: 'Inter', system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
     display: flex; justify-content: center;
   }
   #app { width: 100%; max-width: 560px; height: 100dvh; display: flex; flex-direction: column; position: relative; }
@@ -44,7 +46,9 @@
   .dot { width: 8px; height: 8px; border-radius: 50%; background: #34d399; display: inline-block; }
   .dot.away { background: #64748b; }
   .actions { display: flex; gap: 4px; }
-  .icon-btn { background: none; border: 0; font-size: 20px; padding: 8px; cursor: pointer; filter: grayscale(.2); }
+  .icon-btn { background: none; border: 0; padding: 8px; cursor: pointer; color: var(--text); border-radius: 12px; display: flex; align-items: center; justify-content: center; transition: background .15s, transform .1s; }
+  .icon-btn:hover { background: var(--chip); }
+  .icon-btn:active { transform: scale(.92); }
   .hidden { display: none !important; }
   main#chat { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 16px 14px; display: flex; flex-direction: column; gap: 10px; touch-action: pan-y; }
   .msg { max-width: 82%; padding: 10px 14px; border-radius: 18px; font-size: 15px; line-height: 1.45; word-wrap: break-word; animation: pop .18s ease-out; }
@@ -117,6 +121,25 @@
   #swipeHint { position: absolute; z-index: 6; font-size: 22px; opacity: 0; pointer-events: none; transition: opacity .1s; }
   .seenMark { display: block; font-size: 10px; opacity: .65; margin-top: 3px; text-align: right; }
   .seenMark.isSeen { opacity: .95; }
+  .icon-btn svg { width: 22px; height: 22px; display: block; }
+  .logo svg { width: 26px; height: 26px; display: block; }
+  .msg.bot, .msg.me { box-shadow: 0 1px 3px rgba(0,0,0,.28); }
+  #replyBar svg, #editBar svg { width: 16px; height: 16px; flex-shrink: 0; color: var(--muted); }
+  #editBar .tag { display: flex; align-items: center; gap: 5px; }
+  #replyCancel svg, #editCancel svg { width: 14px; height: 14px; display: block; }
+  #send { display: flex; align-items: center; justify-content: center; transition: transform .1s; }
+  #send:active { transform: scale(.9); }
+  #send svg { width: 20px; height: 20px; display: block; }
+  .msgBtn svg { width: 20px; height: 20px; flex-shrink: 0; opacity: .9; }
+  .msgBtn:hover { background: var(--chip); }
+  #chips button:hover { border-color: #2563eb; }
+  #jumpBtn { display: flex; align-items: center; gap: 6px; }
+  #jumpBtn svg { width: 15px; height: 15px; }
+  #swipeHint svg { width: 26px; height: 26px; display: block; color: #34d399; }
+  input, button { font-family: inherit; }
+  main#chat { scrollbar-width: thin; }
+  main#chat::-webkit-scrollbar { width: 8px; }
+  main#chat::-webkit-scrollbar-thumb { background: rgba(128,140,170,.35); border-radius: 8px; }
   #toast {
     position: fixed; left: 50%; bottom: 90px; transform: translateX(-50%) translateY(20px);
     background: #1e293b; color: #fff; font-size: 13px; padding: 10px 18px; border-radius: 999px;
@@ -128,48 +151,48 @@
 <body>
 <div id="app">
   <header>
-    <div id="logo" class="logo" title="Chat Boy AI">🤖</div>
+    <div id="logo" class="logo" title="Chat Boy AI"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg></div>
     <div class="title">
       <h1>Chat Boy AI</h1>
       <p id="status"><span class="dot"></span><span id="statusText">Always here to help</span></p>
     </div>
     <div class="actions">
-      <button id="themeBtn" class="icon-btn" title="Theme">🌙</button>
-      <button id="bellBtn" class="icon-btn" title="Notifications">🔔</button>
-      <button id="lockBtn" class="icon-btn" title="Lock">🔒</button>
+      <button id="themeBtn" class="icon-btn" title="Theme"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg></button>
+      <button id="bellBtn" class="icon-btn" title="Notifications"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg></button>
+      <button id="lockBtn" class="icon-btn" title="Lock"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></button>
     </div>
   </header>
 
   <main id="chat"></main>
 
   <div id="chips">
-    <button data-q="What can you do?">✨ What can you do?</button>
-    <button data-q="Tell me a joke">😂 Tell me a joke</button>
-    <button data-q="Give me a fun fact">🧠 Fun fact</button>
+    <button data-q="What can you do?">What can you do?</button>
+    <button data-q="Tell me a joke">Tell me a joke</button>
+    <button data-q="Give me a fun fact">Fun fact</button>
   </div>
 
-  <div id="editBar" class="hidden"><span class="tag">✏️ Editing</span><span class="q" id="editText"></span><button id="editCancel" aria-label="Cancel edit">✕</button></div>
-  <div id="replyBar" class="hidden"><span>↩️</span><span class="q" id="replyText"></span><button id="replyCancel" aria-label="Cancel reply">✕</button></div>
+  <div id="editBar" class="hidden"><span class="tag"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>Editing</span><span class="q" id="editText"></span><button id="editCancel" aria-label="Cancel edit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
+  <div id="replyBar" class="hidden"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5v0a5.5 5.5 0 0 1-5.5 5.5H11"/></svg><span class="q" id="replyText"></span><button id="replyCancel" aria-label="Cancel reply"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
 
   <form id="composer">
     <input id="input" placeholder="Ask Chat Boy anything…" autocomplete="off" maxlength="2000"/>
-    <button id="send" type="submit" aria-label="Send">➤</button>
+    <button id="send" type="submit" aria-label="Send"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4 20-7Z"/></svg></button>
   </form>
 
-  <button id="jumpBtn" class="hidden">↓ New messages</button>
-  <div id="swipeHint">↩️</div>
+  <button id="jumpBtn" class="hidden"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg><span>New messages</span></button>
+  <div id="swipeHint"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5v0a5.5 5.5 0 0 1-5.5 5.5H11"/></svg></div>
 </div>
 
 <div id="sheetWrap" class="hidden">
   <div id="sheet">
-    <h2>⚙️ Developer settings</h2>
+    <h2>Developer settings</h2>
     <p class="muted">Enter your API key to enable Pro replies.</p>
     <input id="apiKey" type="password" placeholder="API key" autocomplete="off"/>
     <button id="connectBtn" class="btn">Connect</button>
     <div id="sessInfo" class="hidden">
       <div>Session code: <code id="sessCode">····-····</code></div>
       <div class="muted" style="margin:6px 0 0">Both sides must show the same code.<br/>Seen messages vanish after everyone leaves.</div>
-      <button id="testPushBtn" class="btn ghost" style="margin:10px 0 0">🔔 Send test notification</button>
+      <button id="testPushBtn" class="btn ghost" style="margin:10px 0 0">Send test notification</button>
     </div>
     <button id="closeSheet" class="btn ghost">Close</button>
   </div>
@@ -178,10 +201,10 @@
 <div id="msgSheetWrap" class="hidden">
   <div id="msgSheet">
     <div id="msgSheetPreview"></div>
-    <button class="msgBtn" id="msgReply">↩️ <span>Reply</span></button>
-    <button class="msgBtn" id="msgEdit">✏️ <span>Edit</span></button>
-    <button class="msgBtn" id="msgCopy">📋 <span>Copy</span></button>
-    <button class="msgBtn" id="msgSheetClose">✕ <span>Cancel</span></button>
+    <button class="msgBtn" id="msgReply"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5v0a5.5 5.5 0 0 1-5.5 5.5H11"/></svg> <span>Reply</span></button>
+    <button class="msgBtn" id="msgEdit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg> <span>Edit</span></button>
+    <button class="msgBtn" id="msgCopy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> <span>Copy</span></button>
+    <button class="msgBtn" id="msgSheetClose"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg> <span>Cancel</span></button>
   </div>
 </div>
 
