@@ -85,3 +85,7 @@ Home Screen) on iOS 16.4+. Android works straight from the browser
 - **Clean icon set** — Lucide-style SVG icons and a self-hosted Inter font. No emoji buttons.
 - **Install banner** — nags (politely, every visit) until the app is installed; silent afterwards. iPhone users get Add-to-Home-Screen guidance (required for iOS notifications).
 - **Notification watchdog** — the bell shows the truth (permission-aware, turns red when broken), and a persistent banner with a fix button appears if notifications get blocked or were never allowed.
+- **Message timestamps + day dividers** — every bubble shows its time; your status line reads "10:42 PM · Seen".
+- **Honest ticks** — Sent → Delivered (server ack) → Seen; failed sends keep your draft instead of eating it.
+- **App icon badge + pop sound + vibrate** on new messages.
+- **Reconnecting indicator**, **accent picker** (amber/forest/oxblood in Developer settings), **shake-to-lock**, **tap any quote to jump to the original**.

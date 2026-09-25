@@ -26,12 +26,13 @@ const S = {
   })(),
   idleTimer: null,
   pushOn: localStorage.getItem('cb_push') !== 'off', // notification preference
-  msgIndex: new Map(), // id -> { text, mine, replyTo, seen }
+  msgIndex: new Map(), // id -> { text, mine, replyTo, seen, acked, ts }
   replyTo: null,       // { id, t, mine } quoted in the composer
   stick: true,         // auto-scroll pinned to bottom?
   unread: 0,           // new messages arrived while scrolled up
   online: 1,
   editingId: null,     // message id currently being revised in the composer
+  lastDayStart: null,  // day-divider tracker
   remoteTyping: null,  // friend's typing bubble element
   remoteTypingTimer: null,
 };
@@ -71,10 +72,66 @@ function sendSeen(ids) {
   if (!S.unlocked || !S.ws || S.ws.readyState !== 1 || !ids.length) return;
   try { S.ws.send(JSON.stringify({ type: 'seen', ids })); } catch {}
 }
+function fmtTime(ts) {
+  try { return new Date(ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }); }
+  catch { return ''; }
+}
+function dayLabel(ts) {
+  const d = new Date(ts), now = new Date();
+  const a = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const b = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const diff = Math.round((b - a) / 864e5);
+  if (diff === 0) return 'Today';
+  if (diff === 1) return 'Yesterday';
+  try { return d.toLocaleDateString([], { day: 'numeric', month: 'short' }); } catch { return ''; }
+}
+function maybeDayDivider(ts) {
+  if (!ts) return;
+  const d = new Date(ts);
+  const start = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  if (start === S.lastDayStart) return;
+  S.lastDayStart = start;
+  const el = document.createElement('div');
+  el.className = 'dayDiv';
+  el.textContent = dayLabel(ts);
+  chat.appendChild(el);
+}
+function tickText(rec) {
+  const s = rec.seen ? 'Seen \u2713\u2713' : rec.acked ? '\u2713\u2713 Delivered' : '\u2713 Sent';
+  return rec.ts ? fmtTime(rec.ts) + ' \u00b7 ' + s : s;
+}
+function paintStatus(row, rec) {
+  const el = row.querySelector('.seenMark');
+  if (el) { el.textContent = tickText(rec); el.classList.toggle('isSeen', !!rec.seen); }
+}
+function setBadge(n) {
+  try {
+    if (!('setAppBadge' in navigator)) return;
+    if (n > 0) navigator.setAppBadge(n); else navigator.clearAppBadge();
+  } catch {}
+}
+let AC = null;
+function pop() {
+  try {
+    AC = AC || new (window.AudioContext || window.webkitAudioContext)();
+    if (AC.state === 'suspended') AC.resume();
+    const t = AC.currentTime;
+    const o = AC.createOscillator(), g = AC.createGain();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(520, t);
+    o.frequency.exponentialRampToValueAtTime(880, t + 0.09);
+    g.gain.setValueAtTime(0.18, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.13);
+    o.connect(g); g.connect(AC.destination);
+    o.start(t); o.stop(t + 0.14);
+  } catch {}
+}
+function buzz() { try { navigator.vibrate && navigator.vibrate(30); } catch {} }
 function paintJump() {
   const j = $('jumpBtn');
   j.classList.toggle('hidden', S.stick || !S.unread);
   if (S.unread) j.innerHTML = ICON.chev + '<span>' + S.unread + ' new message' + (S.unread > 1 ? 's' : '') + '</span>';
+  setBadge(S.unread);
 }
 chat.addEventListener('scroll', () => {
   S.stick = chat.scrollHeight - chat.scrollTop - chat.clientHeight < 90;
@@ -170,13 +227,15 @@ function setStatus() {
 }
 
 // Structured chat bubble: optional quote, text, edited marker. Tracked by id.
-function chatBubble(id, who, text, replyTo, edited, seen) {
+function chatBubble(id, who, text, replyTo, edited, meta) {
   const d = document.createElement('div');
   d.className = 'msg ' + who;
   d.dataset.id = id;
   if (replyTo && replyTo.t) {
     const q = document.createElement('div');
-    q.className = 'quote';
+    q.className = 'quote tappable';
+    q.title = 'Jump to original';
+    q.onclick = () => jumpTo(replyTo.id);
     const b = document.createElement('b');
     b.textContent = replyTo.mine ? 'You' : 'Friend';
     const s = document.createElement('span');
@@ -194,10 +253,15 @@ function chatBubble(id, who, text, replyTo, edited, seen) {
     d.appendChild(e);
   }
   if (who === 'me') {
-    const st = document.createElement('span');
-    st.className = 'seenMark' + (seen ? ' isSeen' : '');
-    st.textContent = seen ? 'Seen ✓✓' : '✓ Sent';
-    d.appendChild(st);
+    const el = document.createElement('span');
+    el.className = 'seenMark' + (meta.seen ? ' isSeen' : '');
+    d.appendChild(el);
+    paintStatus(d, meta);
+  } else if (who === 'bot' && meta.ts) {
+    const el = document.createElement('span');
+    el.className = 'timeMark';
+    el.textContent = fmtTime(meta.ts);
+    d.appendChild(el);
   }
   chat.appendChild(d);
   return d;
@@ -206,8 +270,10 @@ function chatBubble(id, who, text, replyTo, edited, seen) {
 async function renderMessage(m, who) {
   try {
     const p = await decryptPayload(m.iv, m.ct);
-    S.msgIndex.set(m.id, { text: p.t, mine: who === 'me', replyTo: p.replyTo || null, seen: !!m.seen });
-    chatBubble(m.id, who, p.t, p.replyTo || null, !!m.edited, !!m.seen);
+    maybeDayDivider(m.ts);
+    const rec = { text: p.t, mine: who === 'me', replyTo: p.replyTo || null, seen: !!m.seen, acked: true, ts: m.ts };
+    S.msgIndex.set(m.id, rec);
+    chatBubble(m.id, who, p.t, p.replyTo || null, !!m.edited, rec);
   } catch {
     bubble('🔒 Couldn\'t decrypt — wrong secret?', 'sys', false);
   }
@@ -238,6 +304,9 @@ function connect() {
   const ws = new WebSocket(`${proto}://${location.host}/ws?room=${S.roomId}&sub=${S.mySubId}`);
   S.ws = ws;
   S.online = 1;
+  statusText.textContent = 'Connecting…';
+  statusDot.className = 'dot retry';
+  ws.onopen = () => { if (S.unlocked) setStatus(); };
   ws.onmessage = async ev => {
     let m;
     try { m = JSON.parse(ev.data); } catch { return; }
@@ -253,6 +322,7 @@ function connect() {
       chat.innerHTML = '';
       hideRemoteTyping();
       S.msgIndex.clear();
+      S.lastDayStart = null;
       S.unread = 0; S.stick = true; paintJump();
       for (const msg of m.messages) await renderMessage(msg, msg.from === S.mySubId ? 'me' : 'bot');
       if (!m.messages.length) sys('Connected. Say hi — seen messages vanish after everyone leaves.');
@@ -262,6 +332,7 @@ function connect() {
     if (m.type === 'msg' && m.message) {
       if (m.message.from === S.mySubId) return; // our own echo from another tab
       await renderMessage(m.message, 'bot');
+      pop(); buzz();
       if (S.stick) scrollDown();
       else { S.unread++; paintJump(); }
       sendSeen([m.message.id]);
@@ -271,13 +342,31 @@ function connect() {
       for (const id of m.ids) {
         const rec = S.msgIndex.get(id);
         if (!rec || !rec.mine || rec.seen) continue;
-        rec.seen = true;
-        const el = chat.querySelector(`.msg[data-id="${CSS.escape(id)}"] .seenMark`);
-        if (el) { el.textContent = 'Seen ✓✓'; el.classList.add('isSeen'); }
+        rec.seen = true; rec.acked = true;
+        const row = chat.querySelector(`.msg[data-id="${CSS.escape(id)}"]`);
+        if (row) paintStatus(row, rec);
       }
     }
+    if (m.type === 'acked' && typeof m.clientId === 'string') {
+      const rec = S.msgIndex.get(m.clientId);
+      if (!rec || !rec.mine || rec.acked) return;
+      rec.acked = true;
+      const row = chat.querySelector(`.msg[data-id="${CSS.escape(m.clientId)}"]`);
+      if (typeof m.id === 'string' && m.id !== m.clientId) {
+        // Server normalized our id — remap so future receipts still match.
+        S.msgIndex.delete(m.clientId);
+        S.msgIndex.set(m.id, rec);
+        if (row) row.dataset.id = m.id;
+      }
+      if (row) paintStatus(row, rec);
+    }
   };
-  ws.onclose = () => { if (S.unlocked) setTimeout(() => S.unlocked && connect(), 2000); };
+  ws.onclose = () => {
+    if (!S.unlocked) return;
+    statusText.textContent = 'Reconnecting…';
+    statusDot.className = 'dot retry';
+    setTimeout(() => S.unlocked && connect(), 2000);
+  };
   ws.onerror = () => { try { ws.close(); } catch {} };
 }
 
@@ -287,6 +376,20 @@ function pokeIdle() {
   S.idleTimer = setTimeout(() => { lock('Session ended (idle too long).'); }, 5 * 60 * 1000);
 }
 ['pointerdown', 'keydown'].forEach(e => addEventListener(e, pokeIdle, { passive: true }));
+
+// Shake to panic-lock (Android needs no permission for this).
+let lastShake = 0, shakeCount = 0;
+addEventListener('devicemotion', e => {
+  if (!S.unlocked) return;
+  const a = e.accelerationIncludingGravity;
+  if (!a || a.x === null) return;
+  if (Math.abs(a.x) + Math.abs(a.y) + Math.abs(a.z) > 42) {
+    const now = Date.now();
+    shakeCount = (now - lastShake < 900) ? shakeCount + 1 : 1;
+    lastShake = now;
+    if (shakeCount >= 2) { shakeCount = 0; lock('Locked'); }
+  }
+});
 
 async function unlock(secret) {
   const { key, roomId, code } = await deriveAll(secret);
@@ -310,6 +413,7 @@ function lock(msg) {
   // NOTE: the secret STAYS in sessionStorage (tab memory, dies with the tab)
   // so triple-tapping 🔒 can quick-rejoin. True logout = close the tab.
   S.msgIndex.clear();
+  S.lastDayStart = null;
   cancelReply();
   cancelEdit();
   hideRemoteTyping();
@@ -474,6 +578,16 @@ function cancelReply() {
   $('replyBar').classList.add('hidden');
 }
 $('replyCancel').onclick = cancelReply;
+function jumpTo(id) {
+  if (!id) return;
+  const el = chat.querySelector(`.msg[data-id="${CSS.escape(id)}"]`);
+  if (!el) return toast('Original message is gone');
+  el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  el.classList.remove('flash');
+  void el.offsetWidth; // restart the animation if re-tapped
+  el.classList.add('flash');
+  setTimeout(() => el.classList.remove('flash'), 1200);
+}
 
 // ── Message action sheet (long-press / right-click menu, Instagram-style) ──
 let sheetId = null;
@@ -631,7 +745,7 @@ form.addEventListener('submit', async e => {
     cancelEdit();
     clearTimeout(typingTimer); sendTyping(false);
     try { await commitEdit(id, text); toast('Edited'); }
-    catch { toast('Edit failed'); }
+    catch { startEdit(id); input.value = text; toast('Edit failed'); }
     return;
   }
   if (!S.unlocked) { bubble(text, 'me'); decoyAnswer(text); return; }
@@ -643,13 +757,15 @@ form.addEventListener('submit', async e => {
     if (S.ws && S.ws.readyState === 1) {
       const id = (crypto.randomUUID ? crypto.randomUUID() : 'm' + Date.now().toString(36) + Math.random().toString(36).slice(2));
       S.ws.send(JSON.stringify({ type: 'msg', id, iv, ct }));
-      S.msgIndex.set(id, { text, mine: true, replyTo: payload.replyTo || null, seen: false });
-      chatBubble(id, 'me', text, payload.replyTo || null, false, false);
+      const rec = { text, mine: true, replyTo: payload.replyTo || null, seen: false, acked: false, ts: Date.now() };
+      S.msgIndex.set(id, rec);
+      maybeDayDivider(rec.ts);
+      chatBubble(id, 'me', text, payload.replyTo || null, false, rec);
       cancelReply();
       clearTimeout(typingTimer); sendTyping(false);
       S.stick = true; S.unread = 0; paintJump(); scrollDown();
-    } else toast('Reconnecting… try again in a sec');
-  } catch { toast('Send failed'); }
+    } else { input.value = text; toast('Reconnecting… try again in a sec'); }
+  } catch { input.value = text; toast('Send failed'); }
 });
 
 chips.addEventListener('click', e => {
@@ -759,6 +875,13 @@ function applyTheme(t) {
   try { localStorage.setItem('cb_theme', t); } catch {}
   $('themeBtn').innerHTML = t === 'light' ? ICON.sun : ICON.moon;
 }
+function applyAccent(a) {
+  if (!['amber', 'forest', 'oxblood'].includes(a)) a = 'amber';
+  document.documentElement.dataset.accent = a;
+  try { localStorage.setItem('cb_accent', a); } catch {}
+  document.querySelectorAll('.swatch').forEach(s => s.classList.toggle('on', s.dataset.a === a));
+}
+document.querySelectorAll('.swatch').forEach(s => { s.onclick = () => applyAccent(s.dataset.a); });
 $('themeBtn').onclick = () => {
   applyTheme(document.documentElement.dataset.theme === 'light' ? 'dark' : 'light');
 };
@@ -766,6 +889,7 @@ $('themeBtn').onclick = () => {
 // ── Boot ──
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
 applyTheme(localStorage.getItem('cb_theme') || 'dark');
+applyAccent(localStorage.getItem('cb_accent') || 'amber');
 decoyWelcome();
 setStatus();
 paintBell();

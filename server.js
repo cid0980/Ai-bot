@@ -196,6 +196,7 @@ wss.on('connection', (ws, req) => {
       for (const c of r.clients) {
         if (c !== ws && c.readyState === 1) c.send(JSON.stringify({ type: 'msg', message: msg }));
       }
+      if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'acked', clientId: m.id, id }));
       notifyRoom(roomId, subId);
     }
   });

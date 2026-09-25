@@ -5,11 +5,10 @@ self.addEventListener('push', event => {
     // Already looking at the chat? Don't buzz — the message is on screen.
     const wins = await clients.matchAll({ type: 'window', includeUncontrolled: true });
     if (wins.some(w => w.focused)) return;
-  try {
-    const d = event.data && event.data.json();
-    if (d.title) title = d.title;
-    if (d.body) body = d.body;
-  } catch {}
+    try {
+      const cur = (typeof navigator.getAppBadge === 'function') ? await navigator.getAppBadge() : 0;
+      await navigator.setAppBadge(cur + 1);
+    } catch {}
     let title = 'Chat Boy AI', body = 'You have a new notification';
     try {
       const d = event.data && event.data.json();
@@ -29,10 +28,10 @@ self.addEventListener('push', event => {
 // Opening from a notification lands on the DECOY screen, locked.
 self.addEventListener('notificationclick', event => {
   event.notification.close();
-  event.waitUntil(
-    clients.matchAll({ type: 'window', includeUncontrolled: true }).then(list => {
-      for (const c of list) if (c.url === self.registration.scope) return c.focus();
-      return clients.openWindow('/');
-    })
-  );
+  event.waitUntil((async () => {
+    try { await navigator.clearAppBadge(); } catch {}
+    const list = await clients.matchAll({ type: 'window', includeUncontrolled: true });
+    for (const c of list) if (c.url === self.registration.scope) return c.focus();
+    return clients.openWindow('/');
+  })());
 });
