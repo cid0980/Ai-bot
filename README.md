@@ -80,3 +80,4 @@ Home Screen) on iOS 16.4+. Android works straight from the browser
 - ⬇️ **Smart auto-scroll** — sticks to bottom while chatting; a "↓ New messages"
   pill appears when you're reading history.
 - 🌙☀️ **Dark / light themes** — toggle in the header, remembered per device.
+- 🔒 **Quick rejoin** — the 🔒 button stays in the header. Single-tap to lock, triple-tap it to jump straight back into the same room (the tab remembers the secret until closed).

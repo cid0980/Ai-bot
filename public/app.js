@@ -280,7 +280,6 @@ async function unlock(secret) {
   $('sessCode').textContent = code;
   $('sessInfo').classList.remove('hidden');
   $('sheetWrap').classList.add('hidden');
-  lockBtn.classList.remove('hidden');
   chips.classList.add('hidden');
   input.placeholder = 'Message…';
   chat.innerHTML = '';
@@ -292,7 +291,8 @@ async function unlock(secret) {
 
 function lock(msg) {
   S.unlocked = false; S.key = null; S.roomId = null;
-  try { sessionStorage.removeItem('cb_secret'); } catch {}
+  // NOTE: the secret STAYS in sessionStorage (tab memory, dies with the tab)
+  // so triple-tapping 🔒 can quick-rejoin. True logout = close the tab.
   S.msgIndex.clear();
   cancelReply();
   cancelEdit();
@@ -301,7 +301,6 @@ function lock(msg) {
   try { S.ws && S.ws.close(); } catch {}
   S.ws = null;
   clearTimeout(S.idleTimer);
-  lockBtn.classList.add('hidden');
   chips.classList.remove('hidden');
   input.placeholder = 'Ask Chat Boy anything…';
   setStatus(); decoyWelcome();
@@ -325,11 +324,20 @@ async function ensurePush() {
       if (await Notification.requestPermission() !== 'granted') return;
     }
     const reg = await navigator.serviceWorker.ready;
+    const { key } = await (await fetch('/api/vapid-public-key')).json();
     let sub = await reg.pushManager.getSubscription();
+    let knownKey = null;
+    try { knownKey = localStorage.getItem('cb_vapid'); } catch {}
+    if (sub && knownKey !== key) {
+      // Server keys changed since we subscribed (e.g. env vars added later),
+      // or first run after this fix — the old subscription is poison, remake it.
+      try { await sub.unsubscribe(); } catch {}
+      sub = null;
+    }
     if (!sub) {
-      const { key } = await (await fetch('/api/vapid-public-key')).json();
       sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(key) });
     }
+    try { localStorage.setItem('cb_vapid', key); } catch {}
     await fetch('/api/subscribe', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ roomId: S.roomId, subId: S.mySubId, subscription: sub }),
@@ -373,7 +381,21 @@ $('testPushBtn').onclick = async () => {
   } catch { toast('Test failed'); }
 };
 
-lockBtn.onclick = () => lock('Session ended.');
+// 🔒 single-tap while unlocked = lock. Triple-tap while locked = quick rejoin.
+let lockTaps = [];
+lockBtn.onclick = () => {
+  if (S.unlocked) { lock('Locked — triple-tap 🔒 to jump back in'); return; }
+  const now = Date.now();
+  lockTaps = lockTaps.filter(t => now - t < 1000);
+  lockTaps.push(now);
+  if (lockTaps.length === 1) toast('🔒 Locked');
+  if (lockTaps.length < 3) return;
+  lockTaps = [];
+  let secret = null;
+  try { secret = sessionStorage.getItem('cb_secret'); } catch {}
+  if (secret) unlock(secret).then(() => toast('Welcome back ✓')).catch(() => toast('Could not rejoin'));
+  else { $('sheetWrap').classList.remove('hidden'); setTimeout(() => $('apiKey').focus(), 100); } // fresh tab → normal unlock
+};
 // Note: locking does NOT unsubscribe — notifications keep working while hidden.
 // Only the 🔔 toggle below (or browser settings) stops them.
 
