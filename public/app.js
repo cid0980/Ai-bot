@@ -301,6 +301,7 @@ async function unlock(secret) {
   sys('Pro connected ✓  Code: ' + code + ' — swipe right to reply, long-press a message for more');
   setStatus(); connect(); pokeIdle();
   await ensurePush(); // needs roomId, so it happens here
+  renderAlerts();
   toast('Pro replies enabled');
 }
 
@@ -414,22 +415,34 @@ lockBtn.onclick = () => {
 // Note: locking does NOT unsubscribe — notifications keep working while hidden.
 // Only the 🔔 toggle below (or browser settings) stops them.
 
-function paintBell() { $('bellBtn').innerHTML = S.pushOn ? ICON.bell : ICON.bellOff; }
+function paintBell() {
+  const granted = ('Notification' in window) && Notification.permission === 'granted';
+  $('bellBtn').innerHTML = (S.pushOn && granted) ? ICON.bell : ICON.bellOff;
+  // Red bell = you want notifications but they CAN'T work. Tap it to fix.
+  $('bellBtn').classList.toggle('warn', S.pushOn && !granted && ('Notification' in window));
+}
 
 $('bellBtn').onclick = async () => {
   if (!('Notification' in window)) return toast('Notifications not supported here');
-  if (Notification.permission !== 'granted') {
+  if (Notification.permission === 'denied') {
+    // The browser will never re-prompt — the user must flip it in site settings.
+    toast('Blocked: address-bar lock icon → Site settings → Notifications → Allow');
+    renderAlerts();
+    return;
+  }
+  if (Notification.permission === 'default') {
     if (await Notification.requestPermission() === 'granted') {
-      S.pushOn = true; localStorage.setItem('cb_push', 'on'); paintBell();
+      S.pushOn = true; localStorage.setItem('cb_push', 'on'); paintBell(); renderAlerts();
       toast('Reply notifications are on');
       if (S.unlocked) ensurePush();
-    } else toast('Notifications blocked in browser settings');
+    } else renderAlerts();
     return;
   }
   // Permission granted → bell is a real on/off switch.
   S.pushOn = !S.pushOn;
   localStorage.setItem('cb_push', S.pushOn ? 'on' : 'off');
   paintBell();
+  renderAlerts();
   if (S.pushOn) {
     if (S.unlocked) await ensurePush();
     toast('Reply notifications are on');
@@ -658,6 +671,88 @@ const ICON = {
   chev: svgIcon('<path d="m6 9 6 6 6-6"/>'),
 };
 
+// ── Alert bar: install nudge + notification watchdog (persistent until fixed) ──
+let deferredInstall = null, installDismissed = false;
+const isIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent) && !window.MSStream;
+const isInstalled = () =>
+  matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+addEventListener('beforeinstallprompt', e => { e.preventDefault(); deferredInstall = e; renderAlerts(); });
+addEventListener('appinstalled', () => { deferredInstall = null; renderAlerts(); });
+
+function renderAlerts() {
+  const bar = $('alertBar');
+  bar.innerHTML = '';
+  const rows = [];
+  const perm = ('Notification' in window) ? Notification.permission : 'unsupported';
+  // 1. Notifications wanted but broken → strongest warning, NO dismiss button.
+  if (S.pushOn && perm === 'denied') {
+    rows.push({ text: 'Notifications are blocked — you will miss new messages.', btn: 'Fix', fn: fixNotif, danger: true });
+  } else if (S.pushOn && perm === 'default') {
+    rows.push({ text: 'Enable notifications to get new-message alerts.', btn: 'Enable', fn: fixNotif });
+  }
+  // 2. Install nudge — every visit until installed (X hides it for this session only).
+  if (!isInstalled() && !installDismissed) {
+    if (deferredInstall) {
+      rows.push({ text: 'Install Chat Boy AI for the full experience.', btn: 'Install', fn: doInstall, x: true });
+    } else if (isIOS()) {
+      rows.push({ text: 'iPhone: Share → Add to Home Screen to install (required for notifications).', x: true });
+    }
+  }
+  for (const r of rows) {
+    const d = document.createElement('div');
+    d.className = 'alertRow' + (r.danger ? ' danger' : '');
+    const s = document.createElement('span');
+    s.textContent = r.text;
+    d.appendChild(s);
+    if (r.btn) {
+      const b = document.createElement('button');
+      b.textContent = r.btn;
+      b.onclick = r.fn;
+      d.appendChild(b);
+    }
+    if (r.x) {
+      const x = document.createElement('button');
+      x.className = 'alertX';
+      x.textContent = '✕';
+      x.setAttribute('aria-label', 'Dismiss');
+      x.onclick = () => { installDismissed = true; renderAlerts(); };
+      d.appendChild(x);
+    }
+    bar.appendChild(d);
+  }
+  bar.classList.toggle('hidden', !rows.length);
+}
+async function fixNotif() {
+  if (!('Notification' in window)) return;
+  if (Notification.permission === 'denied') {
+    toast('Blocked: address-bar lock icon → Site settings → Notifications → Allow');
+    return;
+  }
+  if (await Notification.requestPermission() === 'granted') {
+    S.pushOn = true;
+    try { localStorage.setItem('cb_push', 'on'); } catch {}
+    paintBell();
+    if (S.unlocked) ensurePush();
+    toast('Reply notifications are on');
+  }
+  renderAlerts();
+}
+async function doInstall() {
+  if (!deferredInstall) return;
+  deferredInstall.prompt();
+  await deferredInstall.userChoice; // accepted → `appinstalled` hides the row
+  renderAlerts();
+}
+// Watchdog: re-verify reality whenever the tab regains focus + every 30s.
+let lastPerm = null;
+function checkNotif() {
+  const p = ('Notification' in window) ? Notification.permission : 'unsupported';
+  if (p !== lastPerm) { lastPerm = p; paintBell(); renderAlerts(); }
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden) checkNotif(); });
+addEventListener('focus', checkNotif);
+setInterval(checkNotif, 30000);
+
 // ── Theme (dark / light) ──
 function applyTheme(t) {
   document.documentElement.dataset.theme = t;
@@ -674,6 +769,8 @@ applyTheme(localStorage.getItem('cb_theme') || 'dark');
 decoyWelcome();
 setStatus();
 paintBell();
+renderAlerts();
+checkNotif();
 
 // Refresh-safe session: the tab remembers the secret until it is closed.
 // (New tab / closed tab = locked again. Nothing is written to disk.)

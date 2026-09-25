@@ -83,3 +83,5 @@ Home Screen) on iOS 16.4+. Android works straight from the browser
 - 🔒 **Quick rejoin** — the 🔒 button stays in the header. Single-tap to lock, triple-tap it to jump straight back into the same room (the tab remembers the secret until closed).
 - ✓✓ **Seen receipts** — your messages show *✓ Sent*, flipping to *Seen ✓✓* the moment your friend reads them — synced even if you were offline when they read it.
 - **Clean icon set** — Lucide-style SVG icons and a self-hosted Inter font. No emoji buttons.
+- **Install banner** — nags (politely, every visit) until the app is installed; silent afterwards. iPhone users get Add-to-Home-Screen guidance (required for iOS notifications).
+- **Notification watchdog** — the bell shows the truth (permission-aware, turns red when broken), and a persistent banner with a fix button appears if notifications get blocked or were never allowed.

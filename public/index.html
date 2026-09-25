@@ -7,6 +7,7 @@
 <title>Chat Boy AI</title>
 <link rel="manifest" href="/manifest.webmanifest"/>
 <link rel="icon" href="/icon.svg"/>
+<link rel="apple-touch-icon" href="/icon-180.png"/>
 <style>
   @font-face { font-family: 'Inter'; font-style: normal; font-weight: 100 900; font-display: swap; src: url('/fonts/inter-var.woff2') format('woff2'); }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -142,6 +143,13 @@
   main#chat { scrollbar-width: thin; }
   main#chat::-webkit-scrollbar { width: 8px; }
   main#chat::-webkit-scrollbar-thumb { background: rgba(167,156,140,.4); border-radius: 8px; }
+  #alertBar { display: flex; flex-direction: column; }
+  .alertRow { display: flex; align-items: center; gap: 10px; padding: 9px 14px; font-size: 13px; background: var(--panel); border-bottom: 1px solid var(--line); color: var(--text); }
+  .alertRow.danger { background: rgba(229,72,77,.12); }
+  .alertRow span { flex: 1; }
+  .alertRow button { flex-shrink: 0; background: var(--accent); color: var(--accent-ink); border: 0; border-radius: 999px; padding: 6px 14px; font-size: 12.5px; font-weight: 700; cursor: pointer; }
+  .alertRow .alertX { background: none; color: var(--muted); padding: 6px 8px; font-weight: 400; }
+  .icon-btn.warn { color: #e5484d; }
   #toast {
     position: fixed; left: 50%; bottom: 90px; transform: translateX(-50%) translateY(20px);
     background: #241f17; color: #f3eee3; font-size: 13px; padding: 10px 18px; border-radius: 999px;
@@ -165,6 +173,7 @@
     </div>
   </header>
 
+  <div id="alertBar" class="hidden"></div>
   <main id="chat"></main>
 
   <div id="chips">
