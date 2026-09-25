@@ -142,7 +142,11 @@ wss.on('connection', (ws, req) => {
   r.clients.add(ws);
   sweep(r);
 
-  ws.send(JSON.stringify({ type: 'history', messages: r.messages }));
+  // `seen` = someone OTHER than you confirmed this message (your read receipt).
+  ws.send(JSON.stringify({ type: 'history', messages: r.messages.map(m => ({
+    id: m.id, from: m.from, iv: m.iv, ct: m.ct, ts: m.ts,
+    edited: !!m.edited, seen: m.seenBy.some(s => s !== subId),
+  })) }));
   broadcastPresence(roomId);
 
   ws.on('message', raw => {
@@ -156,9 +160,19 @@ wss.on('connection', (ws, req) => {
       return;
     }
     // Read receipt: client confirms it rendered these messages.
+    // The sender(s) get told live so their ✓ can flip to Seen.
     if (m.type === 'seen' && Array.isArray(m.ids)) {
+      const confirmed = [];
       for (const msg of r.messages) {
-        if (m.ids.includes(msg.id) && !msg.seenBy.includes(subId)) msg.seenBy.push(subId);
+        if (!m.ids.includes(msg.id)) continue;
+        if (!msg.seenBy.includes(subId)) msg.seenBy.push(subId);
+        confirmed.push(msg.id);
+      }
+      if (confirmed.length) {
+        const payload = JSON.stringify({ type: 'seen', by: subId, ids: confirmed });
+        for (const c of r.clients) {
+          if (c !== ws && c.readyState === 1) c.send(payload);
+        }
       }
       return;
     }

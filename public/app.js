@@ -26,7 +26,7 @@ const S = {
   })(),
   idleTimer: null,
   pushOn: localStorage.getItem('cb_push') !== 'off', // notification preference
-  msgIndex: new Map(), // id -> { text, mine, replyTo }
+  msgIndex: new Map(), // id -> { text, mine, replyTo, seen }
   replyTo: null,       // { id, t, mine } quoted in the composer
   stick: true,         // auto-scroll pinned to bottom?
   unread: 0,           // new messages arrived while scrolled up
@@ -170,7 +170,7 @@ function setStatus() {
 }
 
 // Structured chat bubble: optional quote, text, edited marker. Tracked by id.
-function chatBubble(id, who, text, replyTo, edited) {
+function chatBubble(id, who, text, replyTo, edited, seen) {
   const d = document.createElement('div');
   d.className = 'msg ' + who;
   d.dataset.id = id;
@@ -193,6 +193,12 @@ function chatBubble(id, who, text, replyTo, edited) {
     e.textContent = '(edited)';
     d.appendChild(e);
   }
+  if (who === 'me') {
+    const st = document.createElement('span');
+    st.className = 'seenMark' + (seen ? ' isSeen' : '');
+    st.textContent = seen ? 'Seen ✓✓' : '✓ Sent';
+    d.appendChild(st);
+  }
   chat.appendChild(d);
   return d;
 }
@@ -200,8 +206,8 @@ function chatBubble(id, who, text, replyTo, edited) {
 async function renderMessage(m, who) {
   try {
     const p = await decryptPayload(m.iv, m.ct);
-    S.msgIndex.set(m.id, { text: p.t, mine: who === 'me', replyTo: p.replyTo || null });
-    chatBubble(m.id, who, p.t, p.replyTo || null, !!m.edited);
+    S.msgIndex.set(m.id, { text: p.t, mine: who === 'me', replyTo: p.replyTo || null, seen: !!m.seen });
+    chatBubble(m.id, who, p.t, p.replyTo || null, !!m.edited, !!m.seen);
   } catch {
     bubble('🔒 Couldn\'t decrypt — wrong secret?', 'sys', false);
   }
@@ -261,6 +267,15 @@ function connect() {
       sendSeen([m.message.id]);
     }
     if (m.type === 'edit' && m.message) applyEdit(m.message);
+    if (m.type === 'seen' && m.by !== S.mySubId && Array.isArray(m.ids)) {
+      for (const id of m.ids) {
+        const rec = S.msgIndex.get(id);
+        if (!rec || !rec.mine || rec.seen) continue;
+        rec.seen = true;
+        const el = chat.querySelector(`.msg[data-id="${CSS.escape(id)}"] .seenMark`);
+        if (el) { el.textContent = 'Seen ✓✓'; el.classList.add('isSeen'); }
+      }
+    }
   };
   ws.onclose = () => { if (S.unlocked) setTimeout(() => S.unlocked && connect(), 2000); };
   ws.onerror = () => { try { ws.close(); } catch {} };
@@ -615,8 +630,8 @@ form.addEventListener('submit', async e => {
     if (S.ws && S.ws.readyState === 1) {
       const id = (crypto.randomUUID ? crypto.randomUUID() : 'm' + Date.now().toString(36) + Math.random().toString(36).slice(2));
       S.ws.send(JSON.stringify({ type: 'msg', id, iv, ct }));
-      S.msgIndex.set(id, { text, mine: true, replyTo: payload.replyTo || null });
-      chatBubble(id, 'me', text, payload.replyTo || null, false);
+      S.msgIndex.set(id, { text, mine: true, replyTo: payload.replyTo || null, seen: false });
+      chatBubble(id, 'me', text, payload.replyTo || null, false, false);
       cancelReply();
       clearTimeout(typingTimer); sendTyping(false);
       S.stick = true; S.unread = 0; paintJump(); scrollDown();
