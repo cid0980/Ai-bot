@@ -833,9 +833,10 @@ function buildPlayer(rec) {
         if (S.currentAudio === audio) S.currentAudio = null;
       };
       audio.ontimeupdate = () => {
-        const du = audio.duration || rec.dur || 1;
-        fill.style.width = Math.min(100, (audio.currentTime / du) * 100) + '%';
-        time.textContent = fmtDur(audio.currentTime) + ' / ' + fmtDur(du);
+        const du = (isFinite(audio.duration) && audio.duration > 0) ? audio.duration : (rec.dur || 1);
+        const ct = isFinite(audio.currentTime) ? audio.currentTime : 0;
+        fill.style.width = Math.min(100, (ct / du) * 100) + '%';
+        time.textContent = fmtDur(ct) + ' / ' + fmtDur(du);
       };
       audio.onerror = () => { btn.innerHTML = ICON.play; if (S.currentAudio === audio) S.currentAudio = null; toast('Cannot play this voice note'); };
     }
