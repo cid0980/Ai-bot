@@ -75,7 +75,7 @@ app.post('/api/unsubscribe', (req, res) => {
 app.post('/api/test-push', async (req, res) => {
   const { roomId } = req.body || {};
   if (!roomId || !/^[a-f0-9]{64}$/.test(roomId)) return res.status(400).json({ error: 'bad request' });
-  await notifyRoom(roomId, '__nobody__');
+  await notifyRoom(roomId, '__nobody__', true);
   res.json({ ok: true, targets: (subs[roomId] || []).length });
 });
 
@@ -109,14 +109,21 @@ function broadcastPresence(roomId) {
 }
 
 // Deliberately generic: no sender, no content — just "something happened".
-async function notifyRoom(roomId, exceptSubId) {
+async function notifyRoom(roomId, exceptSubId, force = false) {
   const list = subs[roomId] || [];
-  if (!list.length) { console.log(`[push] room ${roomId.slice(0, 8)}… has no subscriptions, skipped`); return; }
+  const room = rooms.get(roomId);
+  const othersOnline = new Set();
+  if (room) for (const c of room.clients) { if (c.readyState === 1 && c._subId && c._subId !== exceptSubId) othersOnline.add(c._subId); }
+  const online = othersOnline.size > 0;
+  if (!list.length) { console.log(`[push] room ${roomId.slice(0, 8)}… has no subscriptions, skipped`); return { sent: 0, online }; }
   const payload = JSON.stringify({ title: 'Chat Boy AI', body: 'You have a new notification' });
+  let sent = 0;
   for (const s of list) {
     if (s.subId === exceptSubId) continue;
+    if (!force && othersOnline.has(s.subId)) continue; // already looking at the chat
     try {
       await webpush.sendNotification(s.subscription, payload);
+      sent++;
       console.log(`[push] sent to ${s.subId.slice(0, 6)}… in room ${roomId.slice(0, 8)}…`);
     } catch (e) {
       console.warn(`[push] FAILED to ${s.subId.slice(0, 6)}… status=${e.statusCode} ${e.body || e.message || ''}`);
@@ -129,6 +136,7 @@ async function notifyRoom(roomId, exceptSubId) {
       }
     }
   }
+  return { sent, online };
 }
 
 wss.on('connection', (ws, req) => {
@@ -140,6 +148,7 @@ wss.on('connection', (ws, req) => {
   const r = getRoom(roomId);
   if (r.wipeTimer) { clearTimeout(r.wipeTimer); r.wipeTimer = null; } // someone's back — cancel wipe
   r.clients.add(ws);
+  ws._subId = subId;
   sweep(r);
 
   // `seen` = someone OTHER than you confirmed this message (your read receipt).
@@ -200,7 +209,7 @@ wss.on('connection', (ws, req) => {
         if (c !== ws && c.readyState === 1) c.send(JSON.stringify({ type: 'msg', message: msg }));
       }
       if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'acked', clientId: m.id, id }));
-      notifyRoom(roomId, subId);
+      notifyRoom(roomId, subId).then(r => { if (ws.readyState === 1) { try { ws.send(JSON.stringify({ type: 'pushinfo', count: r.sent, online: r.online })); } catch {} } }).catch(() => {});
     }
   });
 
