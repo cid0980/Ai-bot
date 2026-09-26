@@ -56,6 +56,7 @@
   .icon-btn:active { transform: scale(.92); }
   .hidden { display: none !important; }
   main#chat { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 16px 14px; display: flex; flex-direction: column; gap: 10px; touch-action: pan-y; }
+  main#chat > :first-child { margin-top: auto; } /* bottom-anchored like every chat app */
   .msg { max-width: 82%; padding: 10px 14px; border-radius: 18px; font-size: 15px; line-height: 1.45; word-wrap: break-word; animation: pop .18s ease-out; }
   @keyframes pop { from { opacity: 0; transform: translateY(6px); } }
   .msg.bot { background: var(--bubble-bot); border-bottom-left-radius: 6px; align-self: flex-start; }
