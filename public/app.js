@@ -589,6 +589,7 @@ function setReply(id) {
   S.replyTo = { id, t: rec.text, mine: rec.mine };
   $('replyText').textContent = `${rec.mine ? 'You' : 'Friend'}: ${rec.text}`;
   $('replyBar').classList.remove('hidden');
+  input.removeAttribute('readonly');
   input.focus();
 }
 function cancelReply() {
@@ -596,6 +597,11 @@ function cancelReply() {
   $('replyBar').classList.add('hidden');
 }
 $('replyCancel').onclick = cancelReply;
+// Autofill nuke: Chrome never shows password/payment/address UI on a readonly
+// field. Readonly drops the instant typing begins, returns on blur.
+input.addEventListener('touchstart', () => input.removeAttribute('readonly'), { passive: true });
+input.addEventListener('focus', () => input.removeAttribute('readonly'));
+input.addEventListener('blur', () => input.setAttribute('readonly', ''));
 function jumpTo(id) {
   if (!id) return;
   const el = chat.querySelector(`.msg[data-id="${CSS.escape(id)}"]`);
@@ -713,6 +719,7 @@ function startEdit(id) {
   $('editBar').classList.remove('hidden');
   input.value = rec.text;
   $('send').innerHTML = ICON.check;
+  input.removeAttribute('readonly');
   input.focus();
 }
 async function commitEdit(id, text) {
