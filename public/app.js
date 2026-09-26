@@ -75,7 +75,7 @@ function sendSeen(ids) {
   try { S.ws.send(JSON.stringify({ type: 'seen', ids })); } catch {}
 }
 function fmtTime(ts) {
-  try { return new Date(ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }); }
+  try { return new Date(ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true }); }
   catch { return ''; }
 }
 function dayLabel(ts) {
@@ -172,7 +172,7 @@ function botReply(q) {
   if (/(fact|did you know)/.test(t)) return pick(FACTS);
   if (/(who are you|your name|about you)/.test(t)) return 'I\'m Chat Boy, your pocket AI buddy! 🤖 Ask me anything — jokes, facts, advice, you name it.';
   if (/(what can you do|help|features)/.test(t)) return 'I can chat, crack jokes 😂, share fun facts 🧠, and keep you company. Try the suggestions below! (Tip: tap the bell icon, top right, so you never miss my replies.)';
-  if (/\btime\b/.test(t)) return 'It\'s ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' right now. ⏰';
+  if (/\btime\b/.test(t)) return 'It\'s ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) + ' right now. ⏰';
   if (/\b(date|day|today)\b/.test(t)) return 'Today is ' + new Date().toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' }) + '. 📅';
   if (/(thank|thanks|thx)/.test(t)) return 'Anytime! That\'s what I\'m here for. 😊';
   if (/(hi|hello|hey|yo)\b/.test(t) && t.length < 20) return pick(['Hey there! 👋 What\'s up?', 'Hello! 😊 How can I help today?', 'Hey hey! Ask me anything. ✨']);
