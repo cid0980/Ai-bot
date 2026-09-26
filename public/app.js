@@ -118,17 +118,22 @@ function pop() {
     AC = AC || new (window.AudioContext || window.webkitAudioContext)();
     if (AC.state === 'suspended') AC.resume();
     const t = AC.currentTime;
-    const o = AC.createOscillator(), g = AC.createGain();
-    o.type = 'sine';
-    o.frequency.setValueAtTime(520, t);
-    o.frequency.exponentialRampToValueAtTime(880, t + 0.09);
-    g.gain.setValueAtTime(0.18, t);
-    g.gain.exponentialRampToValueAtTime(0.001, t + 0.13);
-    o.connect(g); g.connect(AC.destination);
-    o.start(t); o.stop(t + 0.14);
+    const tone = (f0, f1, t0, dur) => {
+      const o = AC.createOscillator(), g = AC.createGain();
+      o.type = 'sine';
+      o.frequency.setValueAtTime(f0, t0);
+      o.frequency.exponentialRampToValueAtTime(f1, t0 + dur * 0.7);
+      g.gain.setValueAtTime(0.0001, t0);
+      g.gain.exponentialRampToValueAtTime(0.32, t0 + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.001, t0 + dur);
+      o.connect(g); g.connect(AC.destination);
+      o.start(t0); o.stop(t0 + dur + 0.02);
+    };
+    tone(740, 1180, t, 0.12);
+    tone(880, 1320, t + 0.13, 0.16);
   } catch {}
 }
-function buzz() { try { navigator.vibrate && navigator.vibrate(30); } catch {} }
+function buzz() { try { navigator.vibrate && navigator.vibrate([45, 60, 45]); } catch {} }
 function stopAudio() { try { S.currentAudio && S.currentAudio.pause(); } catch {} S.currentAudio = null; }
 function clearBlobs() { try { S.blobUrls.forEach(u => URL.revokeObjectURL(u)); } catch {} S.blobUrls.clear(); }
 function paintJump() {
@@ -368,7 +373,7 @@ function connect() {
   S.online = 1;
   statusText.textContent = 'Connecting…';
   statusDot.className = 'dot retry';
-  ws.onopen = () => { if (S.unlocked) setStatus(); };
+  ws.onopen = () => { if (S.unlocked) setStatus(); try { ws.send(JSON.stringify({ type: 'vis', on: !document.hidden })); } catch {} };
   let hbMisses = 0;
   clearInterval(S.hbTimer);
   S.hbTimer = setInterval(() => {
@@ -376,7 +381,7 @@ function connect() {
     if (!S.unlocked) return;
     if (hbMisses >= 2) { try { ws.close(); } catch {} return; } // dead → reconnect flow
     hbMisses++;
-    try { ws.send(JSON.stringify({ type: 'ping' })); } catch {}
+    try { ws.send(JSON.stringify({ type: 'ping', vis: !document.hidden })); } catch {}
   }, 25000);
   ws.onmessage = async ev => {
     let m;
@@ -546,7 +551,7 @@ async function ensurePush() {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ roomId: S.roomId, subId: S.mySubId, subscription: sub }),
     });
-  } catch (e) { console.warn('push setup failed', e); }
+  } catch (e) { console.warn('push setup failed', e); if (!S.pushSetupWarned) { S.pushSetupWarned = true; toast('Could not set up reply notifications'); } }
 }
 
 // ── Unlock gesture: triple-tap the 🤖 logo ──
@@ -1534,6 +1539,7 @@ function checkNotif() {
   if (p !== lastPerm) { lastPerm = p; paintBell(); renderAlerts(); }
 }
 document.addEventListener('visibilitychange', () => { if (!document.hidden) checkNotif(); });
+document.addEventListener('visibilitychange', () => { try { if (S.unlocked && S.ws && S.ws.readyState === 1) S.ws.send(JSON.stringify({ type: 'vis', on: !document.hidden })); } catch {} }); // tell server if we're LOOKING — push skip applies to lookers only
 addEventListener('focus', checkNotif);
 setInterval(checkNotif, 30000);
 

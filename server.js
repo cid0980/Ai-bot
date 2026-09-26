@@ -157,7 +157,7 @@ async function notifyRoom(roomId, exceptSubId, force = false) {
   const list = subs[roomId] || [];
   const room = rooms.get(roomId);
   const othersOnline = new Set();
-  if (room) for (const c of room.clients) { if (c.readyState === 1 && c._subId && c._subId !== exceptSubId) othersOnline.add(c._subId); }
+  if (room) for (const c of room.clients) { if (c.readyState === 1 && c._subId && c._subId !== exceptSubId && c._vis === true) othersOnline.add(c._subId); } // LOOKING only — backgrounded still gets pushed
   const online = othersOnline.size > 0;
   if (!list.length) { console.log(`[push] room ${roomId.slice(0, 8)}… has no subscriptions, skipped`); return { sent: 0, online }; }
   const payload = JSON.stringify({ title: 'Chat Boy AI', body: 'You have a new notification' });
@@ -193,6 +193,7 @@ wss.on('connection', (ws, req) => {
   if (r.wipeTimer) { clearTimeout(r.wipeTimer); r.wipeTimer = null; } // someone's back — cancel wipe
   r.clients.add(ws);
   ws._subId = subId;
+  ws._vis = false; // assume AWAY until proven looking — unknown means PUSH (reliability-first)
   sweep(r);
 
   // `seen` = someone OTHER than you confirmed this message (your read receipt).
@@ -205,7 +206,8 @@ wss.on('connection', (ws, req) => {
   ws.on('message', raw => {
     let m;
     try { m = JSON.parse(raw.toString()); } catch { return; }
-    if (m.type === 'ping') { if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'pong' })); return; }
+    if (m.type === 'ping') { if (typeof m.vis === 'boolean') ws._vis = m.vis; if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'pong' })); return; }
+    if (m.type === 'vis') { ws._vis = m.on === true; return; }
     // Typing indicator: relayed live, never stored (carries no content).
     if (m.type === 'typing') {
       for (const c of r.clients) {
