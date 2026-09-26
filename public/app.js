@@ -408,7 +408,7 @@ async function unlock(secret) {
   $('sheetWrap').classList.add('hidden');
   chips.classList.add('hidden');
   $('attachBtn').classList.remove('hidden');
-  input.placeholder = 'Message…';
+  input.dataset.ph = 'Message…';
   chat.innerHTML = '';
   sys('Pro connected ✓  Code: ' + code + ' — swipe a message to reply, long-press for more');
   setStatus(); connect(); pokeIdle();
@@ -432,7 +432,7 @@ function lock(msg) {
   clearTimeout(S.idleTimer);
   chips.classList.remove('hidden');
   $('attachBtn').classList.add('hidden');
-  input.placeholder = 'Ask Chat Boy anything…';
+  input.dataset.ph = 'Ask Chat Boy anything…';
   setStatus(); decoyWelcome();
   if (msg) toast(msg);
 }
@@ -593,7 +593,6 @@ function setReply(id) {
   S.replyTo = { id, t: rec.text, mine: rec.mine };
   $('replyText').textContent = `${rec.mine ? 'You' : 'Friend'}: ${rec.text}`;
   $('replyBar').classList.remove('hidden');
-  input.removeAttribute('readonly');
   input.focus();
 }
 function cancelReply() {
@@ -603,9 +602,25 @@ function cancelReply() {
 $('replyCancel').onclick = cancelReply;
 // Autofill nuke: Chrome never shows password/payment/address UI on a readonly
 // field. Readonly drops the instant typing begins, returns on blur.
-input.addEventListener('touchstart', () => input.removeAttribute('readonly'), { passive: true });
-input.addEventListener('focus', () => input.removeAttribute('readonly'));
-input.addEventListener('blur', () => input.setAttribute('readonly', ''));
+// Composer is a contenteditable div (not an <input>) so password/payment/
+// address autofill has no field to attach to — the accessory bar is impossible.
+function getComposer() { return input.textContent || ''; }
+function setComposer(t) {
+  input.textContent = t;
+  const r = document.createRange();
+  r.selectNodeContents(input);
+  r.collapse(false);
+  const s = getSelection();
+  s.removeAllRanges(); s.addRange(r);
+}
+input.addEventListener('keydown', e => {
+  if (e.key === 'Enter') { e.preventDefault(); form.requestSubmit(); }
+});
+input.addEventListener('paste', e => {
+  e.preventDefault();
+  const t = ((e.clipboardData || window.clipboardData || {}).getData('text') || '').replace(/\s+/g, ' ');
+  if (t) setComposer((getComposer() + t).slice(0, 2000));
+});
 function jumpTo(id) {
   if (!id) return;
   const el = chat.querySelector(`.msg[data-id="${CSS.escape(id)}"]`);
@@ -721,9 +736,8 @@ function startEdit(id) {
   S.editingId = id;
   $('editText').textContent = rec.text.length > 80 ? rec.text.slice(0, 80) + '…' : rec.text;
   $('editBar').classList.remove('hidden');
-  input.value = rec.text;
+  setComposer(rec.text);
   $('send').innerHTML = ICON.check;
-  input.removeAttribute('readonly');
   input.focus();
 }
 async function commitEdit(id, text) {
@@ -749,7 +763,7 @@ async function commitEdit(id, text) {
 function cancelEdit() {
   S.editingId = null;
   $('editBar').classList.add('hidden');
-  input.value = '';
+  setComposer('');
   $('send').innerHTML = ICON.send;
 }
 $('editCancel').onclick = cancelEdit;
@@ -763,6 +777,8 @@ function sendTyping(on) {
   try { S.ws.send(JSON.stringify({ type: 'typing', on })); } catch {}
 }
 input.addEventListener('input', () => {
+  if (input.textContent === '') input.innerHTML = '';
+  else if (input.textContent.length > 2000) setComposer(getComposer().slice(0, 2000));
   if (!S.unlocked) return;
   sendTyping(true);
   clearTimeout(typingTimer);
@@ -1111,16 +1127,16 @@ $('photoImg').addEventListener('touchend', e => { if (e.touches.length === 0) pz
 // ── Composer ──
 form.addEventListener('submit', async e => {
   e.preventDefault();
-  const text = input.value.trim();
+  const text = getComposer().trim();
   if (!text) return;
-  input.value = '';
+  setComposer('');
   pokeIdle();
   if (S.editingId) {
     const id = S.editingId;
     cancelEdit();
     clearTimeout(typingTimer); sendTyping(false);
     try { await commitEdit(id, text); toast('Edited'); }
-    catch { startEdit(id); input.value = text; toast('Edit failed'); }
+    catch { startEdit(id); setComposer(text); toast('Edit failed'); }
     return;
   }
   if (!S.unlocked) { bubble(text, 'me'); decoyAnswer(text); return; }
@@ -1139,8 +1155,8 @@ form.addEventListener('submit', async e => {
       cancelReply();
       clearTimeout(typingTimer); sendTyping(false);
       S.stick = true; S.unread = 0; paintJump(); scrollDown();
-    } else { input.value = text; toast('Reconnecting… try again in a sec'); }
-  } catch { input.value = text; toast('Send failed'); }
+    } else { setComposer(text); toast('Reconnecting… try again in a sec'); }
+  } catch { setComposer(text); toast('Send failed'); }
 });
 
 chips.addEventListener('click', e => {
