@@ -58,6 +58,8 @@
   main#chat { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 12px 10px; display: flex; flex-direction: column; gap: 6px; touch-action: pan-y; }
   main#chat > :first-child { margin-top: auto; } /* bottom-anchored like every chat app */
   .msg.me + .msg.me, .msg.bot + .msg.bot { margin-top: -3px; } /* same-side hug */
+  .msg.aisha { background: #4a3560; border-bottom-left-radius: 6px; align-self: flex-start; color: #f3e8ff; }
+  .aishaTag { display: block; font-size: 11px; font-weight: 800; color: #d9b8ff; margin-bottom: 2px; }
   .msg { max-width: 78%; padding: 7px 11px; border-radius: 16px; font-size: 14px; line-height: 1.35; word-wrap: break-word; animation: pop .18s ease-out; }
   @keyframes pop { from { opacity: 0; transform: translateY(6px); } }
   .msg.bot { background: var(--bubble-bot); border-bottom-left-radius: 6px; align-self: flex-start; }
@@ -120,6 +122,15 @@
     background: var(--accent); color: var(--accent-ink); cursor: pointer; margin-bottom: 8px;
   }
   .btn.ghost { background: var(--chip); color: var(--text); font-weight: 600; }
+  #famBox { border-top: 1px solid var(--line); margin-top: 4px; padding-top: 12px; }
+  .famTitle { font-size: 15px; font-weight: 800; margin: 0 0 10px; }
+  .famRow { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; font-size: 13px; color: var(--muted); }
+  .famBtns { display: flex; gap: 6px; }
+  .famBtns button { border: 1px solid var(--line); background: var(--bg); color: var(--text); border-radius: 999px; padding: 7px 12px; font-size: 12px; font-weight: 700; cursor: pointer; }
+  .famBtns button.sel { border-color: var(--accent); color: var(--accent-text); background: rgba(232,163,61,.12); }
+  .famKey { display: flex; gap: 6px; flex: 1; max-width: 290px; }
+  #sheet .famKey input { margin-bottom: 0; padding: 8px 10px; font-size: 13px; }
+  .famKey button { flex-shrink: 0; border: 1px solid var(--line); background: var(--chip); color: var(--text); border-radius: 12px; padding: 0 14px; font-size: 13px; font-weight: 700; cursor: pointer; }
   #sessInfo { background: rgba(232,163,61,.1); border: 1px solid rgba(232,163,61,.3); border-radius: 12px; padding: 12px 14px; font-size: 13px; margin-bottom: 12px; }
   #sessInfo code { color: var(--accent-text); font-size: 15px; letter-spacing: 2px; }
   #editBar { display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-top: 1px solid var(--line); background: var(--panel); font-size: 12px; }
@@ -265,6 +276,12 @@
       <button id="testPushBtn" class="btn ghost" style="margin:10px 0 0">Send test notification</button>
     </div>
     <div id="accentRow"><span>Accent</span><span class="swatches"><button class="swatch" data-a="amber" style="--sw:#e8a33d" aria-label="Amber"></button> <button class="swatch" data-a="forest" style="--sw:#7fbf8f" aria-label="Forest"></button> <button class="swatch" data-a="oxblood" style="--sw:#c96f6f" aria-label="Oxblood"></button></span></div>
+    <div id="famBox">
+      <div class="famTitle">👨‍👩‍👧 Family</div>
+      <div class="famRow"><span>This phone is</span><span class="famBtns"><button id="roleDad" type="button">Daddy</button><button id="roleMom" type="button">Mommy</button></span></div>
+      <div class="famRow"><span>Aisha is</span><span class="famBtns"><button id="chatQuiet" type="button">🤫 Quiet</button><button id="chatNormal" type="button">😊 Normal</button><button id="chatNosy" type="button">👀 Nosy</button></span></div>
+      <div class="famRow"><span>Brain key</span><span class="famKey"><input id="aishaKey" type="password" placeholder="Gemini key (optional)" autocomplete="off"/><button id="aishaKeySave" type="button">Save</button></span></div>
+    </div>
     <button id="closeSheet" class="btn ghost">Close</button>
   </div>
 </div>
