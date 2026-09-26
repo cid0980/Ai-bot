@@ -532,7 +532,7 @@ const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch {} };
 const lsDel = k => { try { localStorage.removeItem(k); } catch {} };
 const aishaCfg = () => ({ role: lsGet('aishaRole'), chat: lsGet('aishaChat', 'normal'), key: lsGet('aishaKey') });
 let aishaLast = +(lsGet('aishaLast', '0')) || 0, aishaDay = lsGet('aishaDay'), aishaHours = [];
-let aishaBusy = false, aishaKeyWarned = false, aishaKeyBad = false, aishaRoleWarned = false;
+let aishaBusy = false, aishaKeyWarned = false, aishaKeyBad = false, aishaRoleWarned = false, aishaLastErr = '';
 const AISHA_CALLS = ['yesss?? 🥺', 'what what what 👀', 'present!! 🙋‍♀️', 'i heard my name!! 🧒', 'sup 👀', 'yeah?? make it quick, cartoons are on 📺'];
 const AISHA_JOKES = ['Why did the banana go out? Because it was a-peeling! 🍌', 'What do you call a fish with no eyes? A fsh! 🐟', 'Why is the math book sad? Too many problems! 📕😭', 'What do you call cheese that is not yours? Nacho cheese! 🧀', 'Why did the kid bring a ladder to school? To go to high school! 🪜😂'];
 function aishaLabel(mine) {
@@ -564,6 +564,7 @@ function aishaPrompt(mode, wake) {
 async function aishaAsk(mode, wake) {
   const key = aishaCfg().key;
   if (!key) return null;
+  aishaLastErr = '';
   const body = JSON.stringify({ contents: [{ parts: [{ text: aishaPrompt(mode, wake) }] }], generationConfig: { maxOutputTokens: 120, temperature: 0.9 } });
   for (const m of AISHA_MODELS) {
     try {
@@ -571,12 +572,12 @@ async function aishaAsk(mode, wake) {
       const to = setTimeout(() => ctl.abort(), 20000);
       const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models/' + m + ':generateContent?key=' + encodeURIComponent(key), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, signal: ctl.signal });
       clearTimeout(to);
-      if (!r.ok) continue;
+      if (!r.ok) { try { const je = await r.json(); aishaLastErr = r.status + ' ' + (((je || {}).error || {}).message || ''); } catch { aishaLastErr = String(r.status); } continue; }
       const j = await r.json();
       const parts = (((j.candidates || [])[0] || {}).content || {}).parts || [];
       const txt = (parts.map(p => p.text || '').join('') || '').trim();
       if (txt) return txt.slice(0, 300);
-    } catch { /* try next model, then fallback brain */ }
+    } catch { aishaLastErr = aishaLastErr || 'unreachable'; }
   }
   return null;
 }
@@ -648,7 +649,7 @@ async function aishaReact(sent) {
     let txt = await aishaAsk(mode, wake && mode !== 'wake');
     if (txt && /^nothing\.?!?$/.test(txt.trim().toLowerCase())) txt = '';
     if (!txt) {
-      if (aishaCfg().key && !aishaKeyBad) { aishaKeyBad = true; toast('Aisha\'s brain key isn\'t working — check settings 🥱'); }
+      if (aishaCfg().key && !aishaKeyBad) { aishaKeyBad = true; toast('Brain error' + (aishaLastErr ? ' (' + aishaLastErr.slice(0, 70) + ')' : '') + ' — check key 🥱'); }
       else if (!aishaCfg().key && !aishaKeyWarned) { aishaKeyWarned = true; toast('Aisha is sleepy — add her brain key in settings 🥱'); }
       const lastUser = [...S.msgIndex.values()].reverse().find(r => !r.bot);
       txt = aishaFallback(mode === 'ambient' ? 'ambient' : (mode === 'wake' ? 'wake' : 'call'), lastUser ? (lastUser.text || '') : '');
