@@ -89,10 +89,13 @@ const AISHA_MODELS_SRV = ['gemini-3.5-flash-lite', 'gemini-3.8-flash'];
 const AISHA_SAFE_SRV = ['HARASSMENT', 'HATE_SPEECH', 'SEXUALLY_EXPLICIT', 'DANGEROUS_CONTENT']
   .map(c => ({ category: 'HARM_CATEGORY_' + c, threshold: 'BLOCK_ONLY_HIGH' }));
 
-app.get('/api/aisha-status', (req, res) => res.json({ ok: !!process.env.GEMINI_KEY }));
+const GEMINI_KEY = (process.env.GEMINI_KEY || '').trim(); // env pastes often smuggle whitespace — clients always trimmed
+console.log('[aisha] brain key:', GEMINI_KEY ? `configured (len ${GEMINI_KEY.length})` : 'MISSING — set GEMINI_KEY env var');
+
+app.get('/api/aisha-status', (req, res) => res.json({ ok: !!GEMINI_KEY }));
 
 app.post('/api/aisha', async (req, res) => {
-  const key = process.env.GEMINI_KEY;
+  const key = GEMINI_KEY;
   if (!key) return res.json({ ok: false, reason: 'no key' });
   const prompt = (req.body && req.body.prompt) || '';
   if (typeof prompt !== 'string' || prompt.length < 4 || prompt.length > 6000) {
