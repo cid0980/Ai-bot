@@ -1,7 +1,10 @@
 // ─────────────────────────────────────────────────────────────
 // Chat Boy AI — server
 // A relay that can NEVER read the chat: it only ever sees room IDs
-// (a hash) and AES-encrypted blobs. Messages live in RAM only; seen
+// (a hash) and AES-encrypted blobs. (One exception: Aisha's brain —
+// phones send it readable prompts transiently, never logged or stored,
+// because Gemini cannot read ciphertext.)
+// Messages live in RAM only; seen
 // messages are wiped ~30s after everyone leaves, unread ones expire
 // after 24h, and a restart wipes everything instantly.
 // ─────────────────────────────────────────────────────────────
@@ -77,6 +80,44 @@ app.post('/api/test-push', async (req, res) => {
   if (!roomId || !/^[a-f0-9]{64}$/.test(roomId)) return res.status(400).json({ error: 'bad request' });
   await notifyRoom(roomId, '__nobody__', true);
   res.json({ ok: true, targets: (subs[roomId] || []).length });
+});
+
+// ── Aisha's brain (server proxy). The Gemini key lives ONLY here (Render env
+// var), never on any phone. Phones POST the prompt they built from decrypted
+// chat; the server asks Gemini and returns the reply text or a reason.
+const AISHA_MODELS_SRV = ['gemini-3.5-flash-lite', 'gemini-3.8-flash'];
+const AISHA_SAFE_SRV = ['HARASSMENT', 'HATE_SPEECH', 'SEXUALLY_EXPLICIT', 'DANGEROUS_CONTENT']
+  .map(c => ({ category: 'HARM_CATEGORY_' + c, threshold: 'BLOCK_ONLY_HIGH' }));
+
+app.get('/api/aisha-status', (req, res) => res.json({ ok: !!process.env.GEMINI_KEY }));
+
+app.post('/api/aisha', async (req, res) => {
+  const key = process.env.GEMINI_KEY;
+  if (!key) return res.json({ ok: false, reason: 'no key' });
+  const prompt = (req.body && req.body.prompt) || '';
+  if (typeof prompt !== 'string' || prompt.length < 4 || prompt.length > 6000) {
+    return res.json({ ok: false, reason: 'bad prompt' });
+  }
+  let reason = 'unreachable';
+  const body = JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { maxOutputTokens: 120, temperature: 0.9 }, safetySettings: AISHA_SAFE_SRV });
+  for (const m of AISHA_MODELS_SRV) {
+    try {
+      const ctl = new AbortController();
+      const to = setTimeout(() => ctl.abort(), 25000);
+      const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models/' + m + ':generateContent?key=' + encodeURIComponent(key), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, signal: ctl.signal });
+      clearTimeout(to);
+      if (!r.ok) { try { const je = await r.json(); reason = r.status + ' ' + (((je || {}).error || {}).message || ''); } catch { reason = String(r.status); } continue; }
+      const j = await r.json();
+      const cand0 = ((j.candidates || [])[0] || {});
+      const parts = ((cand0.content || {}).parts || []);
+      const txt = (parts.map(p => p.text || '').join('') || '').trim();
+      if (txt) return res.json({ ok: true, text: txt.slice(0, 300) });
+      const blocked = (((j.promptFeedback || {}).blockReason) || ((cand0.finishReason && cand0.finishReason !== 'STOP') ? cand0.finishReason : '') || '');
+      reason = 'filtered' + (blocked ? ' ' + blocked : '');
+    } catch { reason = reason || 'unreachable'; }
+  }
+  console.log('[aisha] brain failed:', reason.slice(0, 80));
+  res.json({ ok: false, reason: reason.slice(0, 120) });
 });
 
 const PORT = process.env.PORT || 3000;

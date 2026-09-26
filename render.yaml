@@ -1,7 +1,7 @@
 # Render Blueprint — deploy in ~2 clicks.
 # 1. Push this folder to GitHub
 # 2. Render dashboard → New → Blueprint → pick the repo → deploy
-# 3. Add the two VAPID env vars below (values in README / chat)
+# 3. Add the env vars below (values in README / chat)
 services:
   - type: web
     name: chat-boy-ai
@@ -14,4 +14,6 @@ services:
       - key: VAPID_PUBLIC_KEY
         sync: false
       - key: VAPID_PRIVATE_KEY
+        sync: false
+      - key: GEMINI_KEY
         sync: false

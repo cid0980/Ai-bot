@@ -47,9 +47,11 @@ Push notifications require **HTTPS**, so the app needs a permanent home:
    (generate your own pair with `node -e "import('web-push').then(w=>console.log(JSON.stringify(w.default.generateVAPIDKeys())))"`):
    - `VAPID_PUBLIC_KEY` = your public key
    - `VAPID_PRIVATE_KEY` = your private key
+   - `GEMINI_KEY` = your Google AI Studio key (Aisha's brain — lives only on
+     the server, never on any phone)
 4. Render gives you a URL like `https://chat-boy-ai.onrender.com`.
    **That's the one link you share with your friend, once.** Done forever.
-5. (Recommended) Stop cold-start sleeps: create a free **UptimeRobot**
+5. (REQUIRED for Aisha + instant delivery) Stop cold-start sleeps: create a free **UptimeRobot**
    monitor (HTTP, every 5 min) pointing at
    `https://chat-boy-ai.onrender.com/api/health`. This keeps the free
    server awake so messages + notifications are instant, 24/7.
