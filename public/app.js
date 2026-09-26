@@ -917,8 +917,9 @@ async function fileToJpeg(file, maxDim = 1280, q = 0.82) {
   // A 48MP camera photo (~190MB as a bitmap) would OOM a mobile tab otherwise.
   try {
     let dims = null;
-    if (file.type === 'image/png') dims = await pngDims(file);
-    else if (file.type === 'image/jpeg' || file.type === 'image/jpg') dims = await jpegDims(file);
+    const fn = (file.name || '').toLowerCase();
+    if (file.type === 'image/png' || /\.png$/.test(fn)) dims = await pngDims(file);
+    else if (file.type === 'image/jpeg' || file.type === 'image/jpg' || /\.jpe?g$/.test(fn)) dims = await jpegDims(file);
     if (dims && dims.w > 0 && dims.h > 0 && window.createImageBitmap) {
       const sc = Math.min(1, maxDim / Math.max(dims.w, dims.h));
       const w = Math.max(1, Math.round(dims.w * sc)), h = Math.max(1, Math.round(dims.h * sc));
@@ -976,7 +977,10 @@ async function sendMedia(kind, blob, meta = {}) {
   } catch (e) { console.warn('media send failed', e); toast('Send failed'); }
 }
 async function sendPhotoFile(file) {
-  if (!file || !file.type.startsWith('image/')) return toast('Not an image');
+  if (!file) return;
+  const fn = (file.name || '').toLowerCase(), ft = file.type || '';
+  if (ft === 'image/heic' || ft === 'image/heif' || /\.hei[cf]$/.test(fn)) return toast('HEIC photo — set camera to JPEG to send');
+  if (ft && !ft.startsWith('image/') && !/\.(jpe?g|png|webp|gif|bmp)$/.test(fn)) return toast('Not an image');
   try {
     await sendMedia('img', await fileToJpeg(file));
   } catch { toast('Could not read that photo'); }
