@@ -490,7 +490,8 @@ $('logo').addEventListener('click', () => {
 });
 $('closeSheet').onclick = () => $('sheetWrap').classList.add('hidden');
 $('sheetWrap').addEventListener('click', e => { if (e.target.id === 'sheetWrap') $('sheetWrap').classList.add('hidden'); });
-$('connectBtn').onclick = async () => {
+$('unlockForm').onsubmit = async e => {
+  e.preventDefault();
   const v = $('apiKey').value.trim();
   if (!v) return toast('Enter your API key');
   $('connectBtn').textContent = 'Connecting…';
@@ -498,6 +499,13 @@ $('connectBtn').onclick = async () => {
   catch (e) { console.error(e); toast('Could not connect'); }
   $('connectBtn').textContent = 'Connect';
   $('apiKey').value = ''; // don't leave the secret in the DOM
+};
+$('pwEye').onclick = () => {
+  const k = $('apiKey');
+  const show = k.type === 'password';
+  k.type = show ? 'text' : 'password';
+  $('pwEye').textContent = show ? 'Hide' : 'Show';
+  k.focus();
 };
 $('testPushBtn').onclick = async () => {
   if (!S.unlocked) return;
@@ -970,7 +978,7 @@ async function startVoice() {
   if (!mtrk || mtrk.readyState !== 'live') { stream.getTracks().forEach(t => t.stop()); MRstream = null; return toast('No live microphone found'); }
   if (mtrk.muted) { stream.getTracks().forEach(t => t.stop()); MRstream = null; return toast('Mic is muted — another app may be using it'); }
   MRmime = (window.MediaRecorder && ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'].find(t => MediaRecorder.isTypeSupported(t))) || '';
-  try { MR = MRmime ? new MediaRecorder(stream, { mimeType: MRmime }) : new MediaRecorder(stream); }
+  try { MR = MRmime ? new MediaRecorder(stream, { mimeType: MRmime, audioBitsPerSecond: 96000 }) : new MediaRecorder(stream, { audioBitsPerSecond: 96000 }); }
   catch { stream.getTracks().forEach(t => t.stop()); MRstream = null; return toast('Recording not supported'); }
   if (!MRmime) MRmime = MR.mimeType || 'audio/webm';
   MRchunks = []; MRdiscard = false;

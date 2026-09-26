@@ -107,6 +107,9 @@
     border-radius: 12px; padding: 12px 14px; font-size: 15px; outline: none; margin-bottom: 12px;
   }
   #sheet input:focus { border-color: var(--accent); }
+  #pwRow { display: flex; gap: 8px; margin-bottom: 12px; }
+  #pwRow input { margin-bottom: 0; flex: 1; min-width: 0; }
+  #pwEye { flex-shrink: 0; border: 1px solid var(--line); background: var(--bg); color: var(--muted); border-radius: 12px; padding: 0 14px; font-size: 13px; font-weight: 700; cursor: pointer; }
   .btn {
     width: 100%; border: 0; border-radius: 12px; padding: 13px; font-size: 15px; font-weight: 700;
     background: var(--accent); color: var(--accent-ink); cursor: pointer; margin-bottom: 8px;
@@ -232,9 +235,9 @@
   <div id="editBar" class="hidden"><span class="tag"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>Editing</span><span class="q" id="editText"></span><button id="editCancel" aria-label="Cancel edit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
   <div id="replyBar" class="hidden"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5v0a5.5 5.5 0 0 1-5.5 5.5H11"/></svg><span class="q" id="replyText"></span><button id="replyCancel" aria-label="Cancel reply"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
 
-  <form id="composer">
+  <form id="composer" autocomplete="off">
     <button id="attachBtn" class="hidden" type="button" aria-label="Attach"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg></button>
-    <input id="input" placeholder="Ask Chat Boy anything…" autocomplete="off" maxlength="2000"/>
+    <input id="input" name="message" inputmode="text" enterkeyhint="send" autocapitalize="sentences" placeholder="Ask Chat Boy anything…" autocomplete="off" maxlength="2000" data-1p-ignore data-lpignore="true"/>
     <button id="send" type="submit" aria-label="Send"><svg viewBox="0 0 24 24" fill="none" stroke="#211806" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4 20-7Z"/></svg></button>
   </form>
   <div id="recBar" class="hidden"><span class="recDot"></span><span id="recTime">0:00</span><button id="recCancel" class="recBtn" aria-label="Discard"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button><button id="recStop" class="recBtn" aria-label="Stop and send"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="7" width="10" height="10" rx="2"/></svg></button></div>
@@ -249,8 +252,11 @@
   <div id="sheet">
     <h2>Developer settings</h2>
     <p class="muted">Enter your API key to enable Pro replies.</p>
-    <input id="apiKey" type="password" placeholder="API key" autocomplete="off"/>
-    <button id="connectBtn" class="btn">Connect</button>
+    <form id="unlockForm" autocomplete="on">
+      <input type="text" name="username" autocomplete="username" value="chatboy" tabindex="-1" aria-hidden="true" style="position:absolute;opacity:0;height:0;width:0;pointer-events:none"/>
+      <div id="pwRow"><input id="apiKey" type="password" name="password" placeholder="API key" autocomplete="current-password" enterkeyhint="go"/><button id="pwEye" type="button">Show</button></div>
+      <button id="connectBtn" class="btn" type="submit">Connect</button>
+    </form>
     <div id="sessInfo" class="hidden">
       <div>Session code: <code id="sessCode">····-····</code></div>
       <div class="muted" style="margin:6px 0 0">Both sides must show the same code.<br/>Seen messages vanish after everyone leaves.</div>
