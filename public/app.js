@@ -485,13 +485,12 @@ $('logo').addEventListener('click', () => {
     taps = [];
     $('sheetWrap').classList.remove('hidden');
     if (!S.unlocked) { $('apiKey').value = ''; $('sessInfo').classList.add('hidden'); }
-    setTimeout(() => $('apiKey').focus(), 100);
+    setTimeout(() => { $('apiKey').removeAttribute('readonly'); $('apiKey').focus(); }, 100);
   }
 });
 $('closeSheet').onclick = () => $('sheetWrap').classList.add('hidden');
 $('sheetWrap').addEventListener('click', e => { if (e.target.id === 'sheetWrap') $('sheetWrap').classList.add('hidden'); });
-$('unlockForm').onsubmit = async e => {
-  e.preventDefault();
+$('connectBtn').onclick = async () => {
   const v = $('apiKey').value.trim();
   if (!v) return toast('Enter your API key');
   $('connectBtn').textContent = 'Connecting…';
@@ -505,8 +504,13 @@ $('pwEye').onclick = () => {
   const show = k.type === 'password';
   k.type = show ? 'text' : 'password';
   $('pwEye').textContent = show ? 'Hide' : 'Show';
+  k.removeAttribute('readonly');
   k.focus();
 };
+$('apiKey').addEventListener('touchstart', () => $('apiKey').removeAttribute('readonly'), { passive: true });
+$('apiKey').addEventListener('focus', () => $('apiKey').removeAttribute('readonly'));
+$('apiKey').addEventListener('blur', () => $('apiKey').setAttribute('readonly', ''));
+$('apiKey').addEventListener('keydown', e => { if (e.key === 'Enter') $('connectBtn').click(); });
 $('testPushBtn').onclick = async () => {
   if (!S.unlocked) return;
   try {
@@ -532,7 +536,7 @@ lockBtn.onclick = () => {
   let secret = null;
   try { secret = sessionStorage.getItem('cb_secret'); } catch {}
   if (secret) unlock(secret).then(() => toast('Welcome back')).catch(() => toast('Could not rejoin'));
-  else { $('sheetWrap').classList.remove('hidden'); setTimeout(() => $('apiKey').focus(), 100); } // fresh tab → normal unlock
+  else { $('sheetWrap').classList.remove('hidden'); setTimeout(() => { $('apiKey').removeAttribute('readonly'); $('apiKey').focus(); }, 100); } // fresh tab → normal unlock
 };
 // Note: locking does NOT unsubscribe — notifications keep working while hidden.
 // Only the 🔔 toggle below (or browser settings) stops them.
