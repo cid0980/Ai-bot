@@ -268,7 +268,7 @@ function chatBubbleAisha(id, rec) {
   appendQuote(d, rec.replyTo);
   const tag = document.createElement('span');
   tag.className = 'aishaTag';
-  tag.textContent = '🧒 Aisha';
+  tag.innerHTML = '<span class="aishaAva">A</span><span>Aisha</span>';
   d.appendChild(tag);
   const span = document.createElement('span');
   span.className = 'txt';
@@ -336,6 +336,7 @@ async function applyEdit(m) {
 }
 
 function connect() {
+  try { if (S.ws) S.ws.close(); } catch {} // stale socket → dup messages
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   const ws = new WebSocket(`${proto}://${location.host}/ws?room=${S.roomId}&sub=${S.mySubId}`);
   S.ws = ws;
@@ -361,13 +362,14 @@ function connect() {
       S.msgIndex.clear();
       S.lastDayStart = null;
       S.unread = 0; S.stick = true; paintJump();
-      for (const msg of m.messages) await renderMessage(msg, msg.from === S.mySubId ? 'me' : 'bot');
+      for (const msg of m.messages) { if (S.msgIndex.has(msg.id)) continue; await renderMessage(msg, msg.from === S.mySubId ? 'me' : 'bot'); }
       if (!m.messages.length) sys('Connected. Say hi — seen messages vanish after everyone leaves.');
       scrollDown();
       sendSeen(m.messages.map(x => x.id)); // read receipt → server may wipe these later
     }
     if (m.type === 'msg' && m.message) {
       if (m.message.from === S.mySubId) return; // our own echo from another tab
+      if (S.msgIndex.has(m.message.id)) return; // dup delivery → ignore
       const inRec = await renderMessage(m.message, 'bot');
       if (inRec && !inRec.bot && aishaCfg().key && !document.hidden) aishaReact({ text: inRec.text || '', replyTo: inRec.replyTo || null });
       pop(); buzz();
@@ -640,7 +642,7 @@ async function aishaReact(sent) {
     aishaBusy = true;
     const tp = document.createElement('div');
     tp.className = 'msg aisha';
-    tp.innerHTML = '<span class="aishaTag">🧒 Aisha</span><span class="typing"><span></span><span></span><span></span></span>';
+    tp.innerHTML = '<span class="aishaTag"><span class="aishaAva">A</span><span>Aisha</span></span><span class="typing"><span></span><span></span><span></span></span>';
     chat.appendChild(tp); if (S.stick) scrollDown();
     await new Promise(r => setTimeout(r, 1200 + Math.random() * 1500));
     let txt = await aishaAsk(mode, wake && mode !== 'wake');
@@ -692,6 +694,24 @@ $('aishaKeySave').onclick = () => {
   if (v) lsSet('aishaKey', v); else lsDel('aishaKey');
   aishaKeyBad = false; aishaKeyWarned = false;
   paintFam(); toast(v ? 'Brain key saved 🧠' : 'Brain key cleared — Aisha is sleepy 🥱');
+};
+$('aishaKeyTest').onclick = async () => {
+  const v = $('aishaKey').value.trim() || aishaCfg().key;
+  if (!v) return toast('Paste a key first');
+  toast('Testing brain…');
+  try {
+    const ctl = new AbortController();
+    const to = setTimeout(() => ctl.abort(), 15000);
+    const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=' + encodeURIComponent(v), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contents: [{ parts: [{ text: 'Reply with exactly: HI' }] }], generationConfig: { maxOutputTokens: 10 } }), signal: ctl.signal });
+    clearTimeout(to);
+    const j = await r.json().catch(() => ({}));
+    const txt = ((((j.candidates || [])[0] || {}).content || {}).parts || []).map(p => p.text || '').join('').trim();
+    if (r.ok && txt) {
+      if (v !== aishaCfg().key) lsSet('aishaKey', v);
+      aishaKeyBad = false; aishaKeyWarned = false;
+      paintFam(); toast('Brain works ✓ Aisha is smart 🧠');
+    } else toast('Key rejected — ' + (((j.error || {}).message || 'check the key').slice(0, 60)));
+  } catch { toast('Test failed — network?'); }
 };
 try { paintFam(); } catch {}
 $('sheetWrap').addEventListener('click', e => { if (e.target.id === 'sheetWrap') $('sheetWrap').classList.add('hidden'); });

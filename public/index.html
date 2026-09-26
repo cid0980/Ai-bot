@@ -59,7 +59,8 @@
   main#chat > :first-child { margin-top: auto; } /* bottom-anchored like every chat app */
   .msg.me + .msg.me, .msg.bot + .msg.bot { margin-top: -3px; } /* same-side hug */
   .msg.aisha { background: #4a3560; border-bottom-left-radius: 6px; align-self: flex-start; color: #f3e8ff; }
-  .aishaTag { display: block; font-size: 11px; font-weight: 800; color: #d9b8ff; margin-bottom: 2px; }
+  .aishaTag { display: flex; align-items: center; gap: 6px; margin-bottom: 3px; font-size: 11px; font-weight: 800; color: #d9b8ff; }
+  .aishaAva { width: 18px; height: 18px; border-radius: 50%; background: #d9b8ff; color: #4a3560; font-size: 11px; font-weight: 800; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
   .msg { max-width: 78%; padding: 7px 11px; border-radius: 16px; font-size: 14px; line-height: 1.35; word-wrap: break-word; animation: pop .18s ease-out; }
   @keyframes pop { from { opacity: 0; transform: translateY(6px); } }
   .msg.bot { background: var(--bubble-bot); border-bottom-left-radius: 6px; align-self: flex-start; }
@@ -280,7 +281,7 @@
       <div class="famTitle">👨‍👩‍👧 Family</div>
       <div class="famRow"><span>This phone is</span><span class="famBtns"><button id="roleDad" type="button">Daddy</button><button id="roleMom" type="button">Mommy</button></span></div>
       <div class="famRow"><span>Aisha is</span><span class="famBtns"><button id="chatQuiet" type="button">🤫 Quiet</button><button id="chatNormal" type="button">😊 Normal</button><button id="chatNosy" type="button">👀 Nosy</button></span></div>
-      <div class="famRow"><span>Brain key</span><span class="famKey"><input id="aishaKey" type="password" placeholder="Gemini key (optional)" autocomplete="off"/><button id="aishaKeySave" type="button">Save</button></span></div>
+      <div class="famRow"><span>Gemini key</span><span class="famKey"><input id="aishaKey" type="password" placeholder="Gemini key (optional)" autocomplete="off"/><button id="aishaKeySave" type="button">Save</button><button id="aishaKeyTest" type="button">Test</button></span></div>
     </div>
     <button id="closeSheet" class="btn ghost">Close</button>
   </div>
