@@ -152,6 +152,7 @@ wss.on('connection', (ws, req) => {
   ws.on('message', raw => {
     let m;
     try { m = JSON.parse(raw.toString()); } catch { return; }
+    if (m.type === 'ping') { if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'pong' })); return; }
     // Typing indicator: relayed live, never stored (carries no content).
     if (m.type === 'typing') {
       for (const c of r.clients) {
@@ -193,7 +194,7 @@ wss.on('connection', (ws, req) => {
       // Client-generated id (lets the sender render + edit instantly).
       const id = (typeof m.id === 'string' && /^[A-Za-z0-9-]{8,64}$/.test(m.id)) ? m.id : crypto.randomUUID();
       const msg = { id, from: subId, iv: m.iv, ct: m.ct, ts: Date.now(), seenBy: [], ...(kind ? { kind } : {}) };
-      r.messages.push(msg);
+      if (!r.messages.some(x => x.id === id)) r.messages.push(msg); // retry-safe
       if (r.messages.length > 200) r.messages = r.messages.slice(-200);
       for (const c of r.clients) {
         if (c !== ws && c.readyState === 1) c.send(JSON.stringify({ type: 'msg', message: msg }));

@@ -335,6 +335,31 @@ async function applyEdit(m) {
   } catch { /* undecryptable edit — ignore */ }
 }
 
+// ── Delivery safety: every send is tracked until the server acks it.
+const pendingAck = new Map(); // id -> { iv, ct, kind, tries, timer }
+const failedQueue = new Map(); // id -> { iv, ct, kind, tries }
+function clearPending(id) { const p = pendingAck.get(id); if (p) { clearTimeout(p.timer); pendingAck.delete(id); } failedQueue.delete(id); }
+function ackTimeout(id) {
+  const p = pendingAck.get(id);
+  pendingAck.delete(id);
+  const rec = S.msgIndex.get(id);
+  if (!rec || rec.acked) return;
+  if (p && p.tries < 3) failedQueue.set(id, p);
+  rec.failed = true;
+  const row = chat.querySelector(`.msg[data-id="${CSS.escape(id)}"]`);
+  if (row) row.classList.add('failed');
+  if (Date.now() - (S.lastFailToast || 0) > 10000) { S.lastFailToast = Date.now(); toast('Not delivered — will retry on reconnect'); }
+}
+function flushFailed() {
+  if (!S.unlocked || !S.ws || S.ws.readyState !== 1 || !failedQueue.size) return;
+  for (const [id, p] of failedQueue) {
+    failedQueue.delete(id);
+    if (p.tries >= 3) continue;
+    p.tries++;
+    try { S.ws.send(JSON.stringify({ type: 'msg', id, iv: p.iv, ct: p.ct, ...(p.kind ? { kind: p.kind } : {}) })); } catch {}
+    pendingAck.set(id, { iv: p.iv, ct: p.ct, kind: p.kind, tries: p.tries, timer: setTimeout(() => ackTimeout(id), 8000) });
+  }
+}
 function connect() {
   try { if (S.ws) S.ws.close(); } catch {} // stale socket → dup messages
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
@@ -344,9 +369,19 @@ function connect() {
   statusText.textContent = 'Connecting…';
   statusDot.className = 'dot retry';
   ws.onopen = () => { if (S.unlocked) setStatus(); };
+  let hbMisses = 0;
+  clearInterval(S.hbTimer);
+  S.hbTimer = setInterval(() => {
+    if (ws !== S.ws) { clearInterval(S.hbTimer); return; } // stale socket's timer
+    if (!S.unlocked) return;
+    if (hbMisses >= 2) { try { ws.close(); } catch {} return; } // dead → reconnect flow
+    hbMisses++;
+    try { ws.send(JSON.stringify({ type: 'ping' })); } catch {}
+  }, 25000);
   ws.onmessage = async ev => {
     let m;
     try { m = JSON.parse(ev.data); } catch { return; }
+    if (m.type === 'pong') { hbMisses = 0; return; }
     if (m.type === 'presence') { S.online = m.online; setStatus(); }
     if (m.type === 'typing' && m.from !== S.mySubId) {
       clearTimeout(S.remoteTypingTimer);
@@ -366,6 +401,7 @@ function connect() {
       if (!m.messages.length) sys('Connected. Say hi — seen messages vanish after everyone leaves.');
       scrollDown();
       sendSeen(m.messages.map(x => x.id)); // read receipt → server may wipe these later
+      flushFailed();
     }
     if (m.type === 'msg' && m.message) {
       if (m.message.from === S.mySubId) return; // our own echo from another tab
@@ -388,7 +424,9 @@ function connect() {
       }
     }
     if (m.type === 'acked' && typeof m.clientId === 'string') {
+      clearPending(m.clientId);
       const rec = S.msgIndex.get(m.clientId);
+      if (rec) { rec.failed = false; const rr = chat.querySelector(`.msg[data-id="${CSS.escape(m.clientId)}"]`); if (rr) rr.classList.remove('failed'); }
       if (!rec || !rec.mine || rec.acked) return;
       rec.acked = true;
       const row = chat.querySelector(`.msg[data-id="${CSS.escape(m.clientId)}"]`);
@@ -1189,6 +1227,7 @@ async function sendMedia(kind, blob, meta = {}) {
     if (ct.length > 2800000) return toast('File too large after encryption');
     const id = (crypto.randomUUID ? crypto.randomUUID() : 'm' + Date.now().toString(36) + Math.random().toString(36).slice(2));
     S.ws.send(JSON.stringify({ type: 'msg', id, iv, ct, kind }));
+    pendingAck.set(id, { iv, ct, kind, tries: 0, timer: setTimeout(() => ackTimeout(id), 8000) });
     const url = URL.createObjectURL(blob);
     S.blobUrls.add(url);
     const rec = { text: kind === 'img' ? 'Photo' : 'Voice note', kind, mine: true,
@@ -1379,6 +1418,7 @@ form.addEventListener('submit', async e => {
     if (S.ws && S.ws.readyState === 1) {
       const id = (crypto.randomUUID ? crypto.randomUUID() : 'm' + Date.now().toString(36) + Math.random().toString(36).slice(2));
       S.ws.send(JSON.stringify({ type: 'msg', id, iv, ct }));
+      pendingAck.set(id, { iv, ct, kind: null, tries: 0, timer: setTimeout(() => ackTimeout(id), 8000) });
       const rec = { text, mine: true, replyTo: payload.replyTo || null, seen: false, acked: false, ts: Date.now() };
       S.msgIndex.set(id, rec);
       maybeDayDivider(rec.ts);

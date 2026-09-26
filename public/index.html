@@ -58,6 +58,7 @@
   main#chat { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 12px 10px; display: flex; flex-direction: column; gap: 6px; touch-action: pan-y; }
   main#chat > :first-child { margin-top: auto; } /* bottom-anchored like every chat app */
   .msg.me + .msg.me, .msg.bot + .msg.bot { margin-top: -3px; } /* same-side hug */
+  .msg.failed { box-shadow: 0 0 0 1.5px #e5484d; }
   .msg.aisha { background: #4a3560; border-bottom-left-radius: 6px; align-self: flex-start; color: #f3e8ff; }
   .aishaTag { display: flex; align-items: center; gap: 6px; margin-bottom: 3px; font-size: 11px; font-weight: 800; color: #d9b8ff; }
   .aishaAva { width: 18px; height: 18px; border-radius: 50%; background: #d9b8ff; color: #4a3560; font-size: 11px; font-weight: 800; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
