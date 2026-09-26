@@ -298,17 +298,18 @@ async function renderMessage(m, who) {
       } catch { /* undecryptable media — bubble shows a placeholder */ }
       S.msgIndex.set(m.id, rec);
       chatBubbleMedia(m.id, who, rec);
-      return;
+      return rec;
     }
     if (p.bot === 'Aisha') {
       const rec = { text: p.t, mine: false, bot: 'Aisha', replyTo: p.replyTo || null, seen: true, acked: true, ts: m.ts };
       S.msgIndex.set(m.id, rec);
       chatBubbleAisha(m.id, rec);
-      return;
+      return rec;
     }
     const rec = { text: p.t, mine: who === 'me', replyTo: p.replyTo || null, seen: !!m.seen, acked: true, ts: m.ts };
     S.msgIndex.set(m.id, rec);
     chatBubble(m.id, who, p.t, p.replyTo || null, !!m.edited, rec);
+    return rec;
   } catch {
     bubble('🔒 Couldn\'t decrypt — wrong secret?', 'sys', false);
   }
@@ -367,7 +368,8 @@ function connect() {
     }
     if (m.type === 'msg' && m.message) {
       if (m.message.from === S.mySubId) return; // our own echo from another tab
-      await renderMessage(m.message, 'bot');
+      const inRec = await renderMessage(m.message, 'bot');
+      if (inRec && !inRec.bot && aishaCfg().key && !document.hidden) aishaReact({ text: inRec.text || '', replyTo: inRec.replyTo || null });
       pop(); buzz();
       if (S.stick) scrollDown();
       else { S.unread++; paintJump(); }
@@ -613,10 +615,23 @@ function aishaShouldRoll() {
   if (prev && prev.ts && now - prev.ts > 5 * 60 * 1000) return false;
   return Math.random() < (AISHA_DICE[aishaCfg().chat] ?? 0.10);
 }
+function aishaBackup(called, text) {
+  if (!called) return; // backup answers direct calls only — dice stays with the host
+  const t0 = Date.now();
+  setTimeout(() => {
+    try {
+      if (!S.unlocked || !S.ws || S.ws.readyState !== 1) return;
+      if ([...S.msgIndex.values()].some(r => r.bot && r.ts > t0)) return; // host answered
+      const txt = aishaFallback('call', text);
+      if (txt && !/^nothing/i.test(txt.trim())) aishaSend(txt);
+    } catch {}
+  }, 20000);
+}
 async function aishaReact(sent) {
   try {
     if (!S.unlocked || !S.ws || S.ws.readyState !== 1 || aishaBusy) return;
     const called = (!!sent.text && /aisha/i.test(sent.text)) || !!(sent.replyTo && (S.msgIndex.get(sent.replyTo.id) || {}).bot);
+    if (!aishaCfg().key) { aishaBackup(called, sent.text || ''); return; }
     const today = new Date().toDateString();
     const wake = aishaDay !== today && (Date.now() - (aishaLast || 0) > 2 * 3600 * 1000);
     const mode = called ? 'call' : (wake ? 'wake' : (aishaShouldRoll() ? 'ambient' : null));
