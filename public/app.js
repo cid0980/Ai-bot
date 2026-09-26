@@ -974,7 +974,7 @@ async function sendMedia(kind, blob, meta = {}) {
     clearTimeout(typingTimer); sendTyping(false);
     pokeIdle();
     S.stick = true; S.unread = 0; paintJump(); scrollDown();
-  } catch (e) { console.warn('media send failed', e); toast('Send failed'); }
+  } catch (e) { console.warn('media send failed', e); toast('Send failed (' + ((e && e.message) || '?') + ')'); }
 }
 async function sendPhotoFile(file) {
   if (!file) return;
@@ -982,8 +982,10 @@ async function sendPhotoFile(file) {
   if (ft === 'image/heic' || ft === 'image/heif' || /\.hei[cf]$/.test(fn)) return toast('HEIC photo — set camera to JPEG to send');
   if (ft && !ft.startsWith('image/') && !/\.(jpe?g|png|webp|gif|bmp)$/.test(fn)) return toast('Not an image');
   try {
-    await sendMedia('img', await fileToJpeg(file));
-  } catch { toast('Could not read that photo'); }
+    const jpg = await fileToJpeg(file);
+    toast('DBG decoded: ' + Math.round(jpg.size / 1024) + 'KB');
+    await sendMedia('img', jpg);
+  } catch (er) { toast('Could not read that photo (' + ((er && er.message) || '?') + ')'); }
 }
 // ── attach sheet ──
 function openAttach() { if (S.unlocked) $('attachSheetWrap').classList.remove('hidden'); }
@@ -994,8 +996,8 @@ $('attachSheetWrap').addEventListener('click', e => { if (e.target.id === 'attac
 $('attachGallery').onclick = () => { closeAttach(); $('filePick').click(); };
 $('attachCamera').onclick = () => { closeAttach(); $('camPick').click(); };
 $('attachVoice').onclick = () => { closeAttach(); startVoice(); };
-$('filePick').onchange = e => { const f = e.target.files[0]; e.target.value = ''; if (f) sendPhotoFile(f); };
-$('camPick').onchange = e => { const f = e.target.files[0]; e.target.value = ''; if (f) sendPhotoFile(f); };
+$('filePick').onchange = e => { const f = e.target.files[0]; e.target.value = ''; if (f) { toast('DBG gallery: ' + (f.name || '?').slice(-24) + ' | ' + (f.type || 'no-type') + ' | ' + Math.round(f.size / 1024) + 'KB'); sendPhotoFile(f); } };
+$('camPick').onchange = e => { const f = e.target.files[0]; e.target.value = ''; if (f) { toast('DBG camera: ' + (f.name || '?').slice(-24) + ' | ' + (f.type || 'no-type') + ' | ' + Math.round(f.size / 1024) + 'KB'); sendPhotoFile(f); } };
 // ── voice recorder ──
 let MR = null, MRchunks = [], MRtimer = null, MRstart = 0, MRstream = null, MRmime = '', MRdiscard = false;
 let MRAC = null, MRlevelTimer = null;
