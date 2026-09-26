@@ -412,7 +412,7 @@ function connect() {
       if (m.message.from === S.mySubId) return; // our own echo from another tab
       if (S.msgIndex.has(m.message.id)) return; // dup delivery → ignore
       const inRec = await renderMessage(m.message, 'bot');
-      if (inRec && !inRec.bot && aishaCfg().key && !document.hidden) aishaReact({ text: inRec.text || '', replyTo: inRec.replyTo || null });
+      if (inRec && !inRec.bot && !document.hidden) aishaReact({ text: inRec.text || '', replyTo: inRec.replyTo || null }); // no-key phones schedule the 20s backup inside
       pop(); buzz();
       if (S.stick) scrollDown();
       else { S.unread++; paintJump(); }
@@ -575,7 +575,7 @@ const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch {} };
 const lsDel = k => { try { localStorage.removeItem(k); } catch {} };
 const aishaCfg = () => ({ role: lsGet('aishaRole'), chat: lsGet('aishaChat', 'normal'), key: lsGet('aishaKey') });
 let aishaLast = +(lsGet('aishaLast', '0')) || 0, aishaDay = lsGet('aishaDay'), aishaHours = [];
-let aishaBusy = false, aishaKeyWarned = false, aishaKeyBad = false, aishaRoleWarned = false, aishaLastErr = '';
+let aishaBusy = false, aishaKeyWarned = false, aishaKeyBad = false, aishaRoleWarned = false, aishaFilterWarned = false, aishaRetryT = null, aishaLastErr = '';
 const AISHA_CALLS = ['yesss??', 'what what what', 'present!!', 'i heard my name!!', 'sup', 'yeah?? make it quick, cartoons are on'];
 const AISHA_JOKES = ['Why did the banana go out? Because it was a-peeling!', 'What do you call a fish with no eyes? A fsh!', 'Why is the math book sad? Too many problems!', 'What do you call cheese that is not yours? Nacho cheese!', 'Why did the kid bring a ladder to school? To go to high school!'];
 function aishaLabel(mine) {
@@ -608,7 +608,7 @@ async function aishaAsk(mode, wake) {
   const key = aishaCfg().key;
   if (!key) return null;
   aishaLastErr = '';
-  const body = JSON.stringify({ contents: [{ parts: [{ text: aishaPrompt(mode, wake) }] }], generationConfig: { maxOutputTokens: 120, temperature: 0.9 } });
+  const body = JSON.stringify({ contents: [{ parts: [{ text: aishaPrompt(mode, wake) }] }], generationConfig: { maxOutputTokens: 120, temperature: 0.9 }, safetySettings: ['HARASSMENT', 'HATE_SPEECH', 'SEXUALLY_EXPLICIT', 'DANGEROUS_CONTENT'].map(c => ({ category: 'HARM_CATEGORY_' + c, threshold: 'BLOCK_ONLY_HIGH' })) });
   for (const m of AISHA_MODELS) {
     try {
       const ctl = new AbortController();
@@ -617,9 +617,12 @@ async function aishaAsk(mode, wake) {
       clearTimeout(to);
       if (!r.ok) { try { const je = await r.json(); aishaLastErr = r.status + ' ' + (((je || {}).error || {}).message || ''); } catch { aishaLastErr = String(r.status); } continue; }
       const j = await r.json();
-      const parts = (((j.candidates || [])[0] || {}).content || {}).parts || [];
+      const cand0 = ((j.candidates || [])[0] || {});
+      const parts = ((cand0.content || {}).parts || []);
       const txt = (parts.map(p => p.text || '').join('') || '').trim();
-      if (txt) return txt.slice(0, 300);
+      if (txt) { aishaLastErr = ''; return txt.slice(0, 300); }
+      const blocked = (((j.promptFeedback || {}).blockReason) || ((cand0.finishReason && cand0.finishReason !== 'STOP') ? cand0.finishReason : '') || '');
+      aishaLastErr = 'filtered' + (blocked ? ' ' + blocked : '');
     } catch { aishaLastErr = aishaLastErr || 'unreachable'; }
   }
   return null;
@@ -674,9 +677,11 @@ function aishaBackup(called, text) {
   }, 20000);
 }
 async function aishaReact(sent) {
+  let tp = null;
   try {
-    if (!S.unlocked || !S.ws || S.ws.readyState !== 1 || aishaBusy) return;
+    if (!S.unlocked || !S.ws || S.ws.readyState !== 1) return;
     const called = (!!sent.text && /aisha/i.test(sent.text)) || !!(sent.replyTo && (S.msgIndex.get(sent.replyTo.id) || {}).bot);
+    if (aishaBusy) { if (called && !aishaRetryT) { aishaRetryT = setTimeout(() => { aishaRetryT = null; aishaReact(sent); }, 9000); } return; }
     if (!aishaCfg().key) { aishaBackup(called, sent.text || ''); return; }
     const today = new Date().toDateString();
     const wake = aishaDay !== today && (Date.now() - (aishaLast || 0) > 2 * 3600 * 1000);
@@ -684,7 +689,7 @@ async function aishaReact(sent) {
     if (!mode) return;
     if (!aishaCfg().role && !aishaRoleWarned) { aishaRoleWarned = true; toast('Psst — tell Aisha whose phone this is! (🔔 → Family)'); }
     aishaBusy = true;
-    const tp = document.createElement('div');
+    tp = document.createElement('div');
     tp.className = 'msg aisha';
     tp.innerHTML = '<span class="aishaTag"><span class="aishaAva">A</span><span>Aisha</span></span><span class="typing"><span></span><span></span><span></span></span>';
     chat.appendChild(tp); if (S.stick) scrollDown();
@@ -692,7 +697,8 @@ async function aishaReact(sent) {
     let txt = await aishaAsk(mode, wake && mode !== 'wake');
     if (txt && /^nothing\.?!?$/.test(txt.trim().toLowerCase())) txt = '';
     if (!txt) {
-      if (aishaCfg().key && !aishaKeyBad) { aishaKeyBad = true; toast('Brain error' + (aishaLastErr ? ' (' + aishaLastErr.slice(0, 70) + ')' : '') + ' — check key 🥱'); }
+      if (/^filtered/.test(aishaLastErr || '')) { if (!aishaFilterWarned) { aishaFilterWarned = true; toast('Brain skipped that one (filtered' + (aishaLastErr.slice(8) ? ' ' + aishaLastErr.slice(9, 40) : '') + ') — answering simply'); } }
+      else if (aishaCfg().key && !aishaKeyBad) { aishaKeyBad = true; toast('Brain error' + (aishaLastErr ? ' (' + aishaLastErr.slice(0, 70) + ')' : '') + ' — check key 🥱'); }
       else if (!aishaCfg().key && !aishaKeyWarned) { aishaKeyWarned = true; toast('Aisha is sleepy — add her brain key in settings 🥱'); }
       const lastUser = [...S.msgIndex.values()].reverse().find(r => !r.bot);
       txt = aishaFallback(mode === 'ambient' ? 'ambient' : (mode === 'wake' ? 'wake' : 'call'), lastUser ? (lastUser.text || '') : '');
@@ -701,7 +707,7 @@ async function aishaReact(sent) {
     try { tp.remove(); } catch {}
     if (txt) await aishaSend(txt);
   } catch (e) { console.warn('aisha failed', e); }
-  finally { aishaBusy = false; }
+  finally { try { if (tp) tp.remove(); } catch {} aishaBusy = false; }
 }
 async function aishaSend(text) {
   const { iv, ct } = await encryptPayload({ t: text, bot: 'Aisha' });
@@ -736,7 +742,7 @@ $('chatNosy').onclick = () => { lsSet('aishaChat', 'nosy'); paintFam(); toast('N
 $('aishaKeySave').onclick = () => {
   const v = $('aishaKey').value.trim();
   if (v) lsSet('aishaKey', v); else lsDel('aishaKey');
-  aishaKeyBad = false; aishaKeyWarned = false;
+  aishaKeyBad = false; aishaKeyWarned = false; aishaFilterWarned = false;
   paintFam(); toast(v ? 'Brain key saved 🧠' : 'Brain key cleared — Aisha is sleepy 🥱');
 };
 $('aishaKeyTest').onclick = async () => {
@@ -752,7 +758,7 @@ $('aishaKeyTest').onclick = async () => {
     const txt = ((((j.candidates || [])[0] || {}).content || {}).parts || []).map(p => p.text || '').join('').trim();
     if (r.ok && txt) {
       if (v !== aishaCfg().key) lsSet('aishaKey', v);
-      aishaKeyBad = false; aishaKeyWarned = false;
+      aishaKeyBad = false; aishaKeyWarned = false; aishaFilterWarned = false;
       paintFam(); toast('Brain works ✓ Aisha is smart 🧠');
     } else toast('Key rejected — ' + (((j.error || {}).message || 'check the key').slice(0, 60)));
   } catch { toast('Test failed — network?'); }
