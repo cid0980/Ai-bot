@@ -99,7 +99,7 @@ function maybeDayDivider(ts) {
   chat.appendChild(el);
 }
 function tickText(rec) {
-  const s = rec.seen ? 'Seen \u2713\u2713' : rec.acked ? '\u2713\u2713 Delivered' : '\u2713 Sent';
+  const s = rec.seen ? '\u2713\u2713' : rec.acked ? '\u2713\u2713' : '\u2713';
   return rec.ts ? fmtTime(rec.ts) + ' \u00b7 ' + s : s;
 }
 function paintStatus(row, rec) {
