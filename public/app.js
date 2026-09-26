@@ -525,7 +525,7 @@ $('logo').addEventListener('click', () => {
 // always answer, otherwise a chattiness dice roll with cooldowns. Her reply is
 // just an encrypted text message tagged { bot: 'Aisha' } — the server relays
 // blindly, both phones render her third-person bubble.
-const AISHA_MODELS = ['gemini-2.5-flash', 'gemini-2.5-flash-lite'];
+const AISHA_MODELS = ['gemini-3.5-flash-lite', 'gemini-3.8-flash'];
 const AISHA_DICE = { quiet: 0.03, normal: 0.10, nosy: 0.25 };
 const lsGet = (k, d = '') => { try { return localStorage.getItem(k) ?? d; } catch { return d; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch {} };
@@ -703,7 +703,7 @@ $('aishaKeyTest').onclick = async () => {
   try {
     const ctl = new AbortController();
     const to = setTimeout(() => ctl.abort(), 15000);
-    const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=' + encodeURIComponent(v), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contents: [{ parts: [{ text: 'Reply with exactly: HI' }] }], generationConfig: { maxOutputTokens: 10 } }), signal: ctl.signal });
+    const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=' + encodeURIComponent(v), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contents: [{ parts: [{ text: 'Reply with exactly: HI' }] }], generationConfig: { maxOutputTokens: 10 } }), signal: ctl.signal });
     clearTimeout(to);
     const j = await r.json().catch(() => ({}));
     const txt = ((((j.candidates || [])[0] || {}).content || {}).parts || []).map(p => p.text || '').join('').trim();
