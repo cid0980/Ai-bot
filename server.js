@@ -166,7 +166,7 @@ async function notifyRoom(roomId, exceptSubId, force = false) {
     if (s.subId === exceptSubId) continue;
     if (!force && othersOnline.has(s.subId)) continue; // already looking at the chat
     try {
-      await webpush.sendNotification(s.subscription, payload);
+      await webpush.sendNotification(s.subscription, payload, { urgency: 'high' }); // high-priority FCM: wakes dozing/Oppo phones instead of batching on open
       sent++;
       console.log(`[push] sent to ${s.subId.slice(0, 6)}… in room ${roomId.slice(0, 8)}…`);
     } catch (e) {
