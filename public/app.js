@@ -697,7 +697,7 @@ async function aishaReact(sent) {
     const wake = aishaDay !== today && (Date.now() - (aishaLast || 0) > 2 * 3600 * 1000);
     const mode = calledByName ? 'call' : (repliedTo ? 'reply' : (wake ? 'wake' : (aishaShouldRoll() ? 'ambient' : null)));
     if (!mode) return;
-    if (!aishaCfg().role && !aishaRoleWarned) { aishaRoleWarned = true; toast('Psst — tell Aisha whose phone this is! (🔔 → Family)'); }
+    if (!aishaCfg().role && !aishaRoleWarned) { aishaRoleWarned = true; toast('Psst — tell Aisha whose phone this is! (triple-tap the logo → Family)'); }
     aishaBusy = true;
     tp = document.createElement('div');
     tp.className = 'msg aisha';
