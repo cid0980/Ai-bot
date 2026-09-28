@@ -583,6 +583,7 @@ const aishaCfg = () => ({ role: lsGet('aishaRole'), chat: lsGet('aishaChat', 'no
 let aishaLast = +(lsGet('aishaLast', '0')) || 0, aishaDay = lsGet('aishaDay'), aishaHours = [];
 let aishaBusy = false, aishaKeyWarned = false, aishaKeyBad = false, aishaRoleWarned = false, aishaFilterWarned = false, aishaRetryT = null, aishaLastErr = '';
 const AISHA_CALLS = ['yesss??', 'what what what', 'present!!', 'i heard my name!!', 'sup', 'heyyy i missed you!!', 'yeah?? make it quick, cartoons are on'];
+const AISHA_REPLIES = ['yeah?? tell me more', 'and then what', 'wait really??', 'hmm what do you mean', 'okay okay i am listening', 'ooh go on!!'];
 const AISHA_JOKES = ['Why did the banana go out? Because it was a-peeling!', 'What do you call a fish with no eyes? A fsh!', 'Why is the math book sad? Too many problems!', 'What do you call cheese that is not yours? Nacho cheese!', 'Why did the kid bring a ladder to school? To go to high school!'];
 function aishaLabel(mine) {
   const r = aishaCfg().role;
@@ -603,6 +604,7 @@ function aishaPrompt(mode, wake) {
   const timeStr = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
   let job = '';
   if (mode === 'call') job = 'Daddy or Mommy just called you by name. Answer them directly and warmly about what they said — you are happy they called you.';
+  else if (mode === 'reply') job = 'They replied to YOUR message (find it in the chat above). Continue that exact conversation naturally — answer or react to what they just said. They did NOT call your name, so NEVER mention being called or say yay-my-name.';
   else if (mode === 'wake') job = 'You just woke up (first chat of the day). Say a sweet good morning and playfully roast the time if it is afternoon or night.';
   else job = 'You overheard Mommy and Daddy chatting. FIRST read the room: what is the MOOD (playful, tired, excited, sad, romantic, stressed, funny, serious)? What TOPIC are they on (food, plans, work, jokes, memories)? Then react to THAT SPECIFIC thing like a real kid in the room — mirror their energy, name what they said, laugh along, comfort, or beg to join. If flirting or lovey, tease them about the specific cute thing they said — never a generic line. If tense or fighting, be a worried peacemaker who wants a group hug. If tired or sad, be extra sweet and comforting. If planning something fun (food, movie, outing), BEG to join with specifics. NEVER be generic — a reply that could fit any chat is a failure. NEVER repeat anything you already said (your recent lines are in the chat above). If it is boring (ok, lol, k, logistics), reply with exactly: NOTHING';
   return 'You are Aisha, a real 10-year-old girl in a family group chat with her parents. You believe you are human. It is ' + timeStr + ' now.\n'
@@ -655,7 +657,7 @@ function aishaFallback(kind, lastUserText = '') {
   if (has('shut up', 'quiet', 'silent')) return 'make me';
   if (has('photo', '📸', 'picture', 'pic')) return pick(['SHOW MEEE', 'i wanna see!!']);
   if (has('sing', 'song', 'voice')) return 'sing?? la la laaa';
-  return pick(AISHA_CALLS);
+  return pick(kind === 'reply' ? AISHA_REPLIES : AISHA_CALLS);
 }
 function aishaShouldRoll() {
   if (!S.unlocked || !S.ws || S.ws.readyState !== 1) return false;
@@ -673,11 +675,13 @@ async function aishaReact(sent) {
   let tp = null;
   try {
     if (!S.unlocked || !S.ws || S.ws.readyState !== 1) return;
-    const called = (!!sent.text && /aisha/i.test(sent.text)) || !!(sent.replyTo && (S.msgIndex.get(sent.replyTo.id) || {}).bot);
+    const calledByName = !!sent.text && /aisha/i.test(sent.text);
+    const repliedTo = !!(sent.replyTo && (S.msgIndex.get(sent.replyTo.id) || {}).bot);
+    const called = calledByName || repliedTo;
     if (aishaBusy) { if (called && !aishaRetryT) { aishaRetryT = setTimeout(() => { aishaRetryT = null; aishaReact(sent); }, 9000); } return; }
     const today = new Date().toDateString();
     const wake = aishaDay !== today && (Date.now() - (aishaLast || 0) > 2 * 3600 * 1000);
-    const mode = called ? 'call' : (wake ? 'wake' : (aishaShouldRoll() ? 'ambient' : null));
+    const mode = calledByName ? 'call' : (repliedTo ? 'reply' : (wake ? 'wake' : (aishaShouldRoll() ? 'ambient' : null)));
     if (!mode) return;
     if (!aishaCfg().role && !aishaRoleWarned) { aishaRoleWarned = true; toast('Psst — tell Aisha whose phone this is! (🔔 → Family)'); }
     aishaBusy = true;
@@ -692,7 +696,7 @@ async function aishaReact(sent) {
       if (/^filtered/.test(aishaLastErr || '')) { if (!aishaFilterWarned) { aishaFilterWarned = true; toast('Brain skipped that one (filtered' + (aishaLastErr.slice(8) ? ' ' + aishaLastErr.slice(9, 40) : '') + ') — answering simply'); } }
       else if (!aishaKeyBad) { aishaKeyBad = true; toast('Brain error' + (aishaLastErr ? ' (' + aishaLastErr.slice(0, 70) + ')' : '') + ' — server brain? 🥱'); }
       const recentUser = [...S.msgIndex.values()].reverse().filter(r => !r.bot).slice(0, 3).map(r => r.text || '').join(' ');
-      txt = aishaFallback(mode === 'ambient' ? 'ambient' : (mode === 'wake' ? 'wake' : 'call'), recentUser);
+      txt = aishaFallback(mode === 'ambient' ? 'ambient' : (mode === 'wake' ? 'wake' : mode), recentUser);
       if (/^nothing/i.test((txt || '').trim())) txt = '';
     }
     try { tp.remove(); } catch {}
