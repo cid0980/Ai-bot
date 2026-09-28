@@ -551,7 +551,7 @@ async function ensurePush() {
     try { localStorage.setItem('cb_vapid', key); } catch {}
     await fetch('/api/subscribe', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ roomId: S.roomId, subId: S.mySubId, subscription: sub, tgId: lsGet('tgId', '') || undefined }),
+      body: JSON.stringify({ roomId: S.roomId, subId: S.mySubId, subscription: sub, tgId: lsGet('tgId', '') || undefined, ntf: lsGet('ntf', '') || undefined }),
     });
   } catch (e) { console.warn('push setup failed', e); if (!S.pushSetupWarned) { S.pushSetupWarned = true; toast('Could not set up reply notifications'); } }
 }
@@ -745,6 +745,7 @@ function paintFam() {
   $('chatNosy').classList.toggle('sel', c.chat === 'nosy');
   refreshBrain(); // async server-brain status (key lives on server now)
   try { $('tgId').value = lsGet('tgId', ''); } catch {}
+  try { $('ntf').value = lsGet('ntf', ''); } catch {}
 }
 $('roleDad').onclick = () => { lsSet('aishaRole', 'daddy'); paintFam(); toast("Aisha knows this is Daddy's phone 🧒"); };
 $('roleMom').onclick = () => { lsSet('aishaRole', 'mommy'); paintFam(); toast("Aisha knows this is Mommy's phone 🧒"); };
@@ -752,6 +753,7 @@ $('chatQuiet').onclick = () => { lsSet('aishaChat', 'quiet'); paintFam(); };
 $('chatNormal').onclick = () => { lsSet('aishaChat', 'normal'); paintFam(); };
 $('chatNosy').onclick = () => { lsSet('aishaChat', 'nosy'); paintFam(); toast('Nosy Aisha. Brave. 👀'); };
 $('tgSave').onclick = () => { const v = $('tgId').value.trim(); if (v && !/^\d{5,20}$/.test(v)) return toast('That id looks wrong — digits only'); if (v) lsSet('tgId', v); else lsDel('tgId'); if (S.unlocked) ensurePush(); toast(v ? 'Telegram backup on 📲' : 'Telegram backup off'); };
+$('ntfSave').onclick = () => { const v = $('ntf').value.trim(); if (v && !/^[A-Za-z0-9_-]{8,64}$/.test(v)) return toast('Topic: letters, numbers, _ - only (8+ chars)'); if (v) lsSet('ntf', v); else lsDel('ntf'); if (S.unlocked) ensurePush(); toast(v ? 'ntfy backup on 📲' : 'ntfy backup off'); };
 $('aishaKeyTest').onclick = async () => {
   toast('Testing brain…');
   try {

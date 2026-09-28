@@ -57,11 +57,12 @@ app.get('/api/health', (req, res) => res.json({ ok: true, rooms: rooms.size }));
 app.post('/api/subscribe', (req, res) => {
   const { roomId, subId, subscription } = req.body || {};
   const tgId = (/^\d{5,20}$/.test((req.body && req.body.tgId) || '')) ? req.body.tgId : null; // optional telegram backup id
+  const ntf = (/^[A-Za-z0-9_-]{8,64}$/.test((req.body && req.body.ntf) || '')) ? req.body.ntf : null; // optional ntfy backup topic
   if (!roomId || !/^[a-f0-9]{64}$/.test(roomId) || !subId || !subscription?.endpoint) {
     return res.status(400).json({ error: 'bad request' });
   }
   subs[roomId] = (subs[roomId] || []).filter(s => s.subId !== subId);
-  subs[roomId].push({ subId, subscription, tgId });
+  subs[roomId].push({ subId, subscription, tgId, ntf });
   saveSubs();
   console.log(`[push] subscribed ${subId.slice(0, 6)}… to room ${roomId.slice(0, 8)}… (${subs[roomId].length} device(s))`);
   res.json({ ok: true });
@@ -184,6 +185,28 @@ async function notifyRoom(roomId, exceptSubId, force = false) {
   return { sent, online };
 }
 
+// ── ntfy backup ping (optional). Same idea as Telegram but needs no account:
+// user installs the ntfy app, subscribes a secret topic, saves it in settings.
+// Server POSTs a generic high-priority ping for recipients who aren't LOOKING.
+// Generic text only. Failures never break chat.
+async function ntfyPing(roomId, exceptSubId) {
+  try {
+    const list = subs[roomId] || [];
+    const room = rooms.get(roomId);
+    const looking = new Set();
+    if (room) for (const c of room.clients) { if (c.readyState === 1 && c._subId && c._vis === true) looking.add(c._subId); }
+    const targets = [...new Set(list.filter(s => s.ntf && s.subId !== exceptSubId && !looking.has(s.subId)).map(s => s.ntf))];
+    if (!targets.length) return;
+    for (const topic of targets) {
+      try {
+        const r = await fetch('https://ntfy.sh/' + encodeURIComponent(topic), { method: 'POST', headers: { Title: 'Chat Boy AI', Priority: 'high', Tags: 'speech_balloon' }, body: 'You have a new notification' });
+        if (!r.ok) console.warn('[ntfy] send failed', r.status);
+        else console.log('[ntfy] pinged', topic.slice(-4).padStart(4, '*'));
+      } catch (e) { console.warn('[ntfy] unreachable', String(e && e.message || e).slice(0, 60)); }
+    }
+  } catch (e) { console.warn('[ntfy] error', String(e && e.message || e).slice(0, 80)); }
+}
+
 // ── Telegram backup ping (optional). If TELEGRAM_BOT_TOKEN is set and a user
 // saved their chat id in settings, every message ALSO triggers a generic
 // Telegram ping for recipients who aren't LOOKING — Telegram's push infra is
@@ -283,6 +306,7 @@ wss.on('connection', (ws, req) => {
       if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'acked', clientId: m.id, id }));
       notifyRoom(roomId, subId).then(r => { if (ws.readyState === 1) { try { ws.send(JSON.stringify({ type: 'pushinfo', count: r.sent, online: r.online })); } catch {} } }).catch(() => {});
       telegramPing(roomId, subId).catch(() => {}); // backup channel — never blocks chat
+      ntfyPing(roomId, subId).catch(() => {}); // second backup — never blocks chat
     }
   });
 
