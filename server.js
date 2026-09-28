@@ -11,8 +11,6 @@
 import express from 'express';
 import { WebSocketServer } from 'ws';
 import webpush from 'web-push';
-import nodemailer from 'nodemailer';
-import dns from 'node:dns';
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
@@ -191,54 +189,37 @@ async function notifyRoom(roomId, exceptSubId, force = false) {
   return { sent, online };
 }
 
-// ── Email backup ping (optional, via Gmail SMTP + app password). User saves
-// their address in settings; owner puts GMAIL_USER/GMAIL_PASS (app password,
+// ── Email backup ping (optional, via Resend HTTPS API). User saves
+// their address in settings; owner puts RESEND_API_KEY (from resend.com)
 // NOT the login password) in Render env. Same skip rules as the other
 // backups. Generic text only. Failures never break chat.
-// Gmail SMTP from Render free is flaky (no IPv6 route + some IPv4 paths get
-// tarpitted), so every ping rolls fresh dice: resolve Gmail's IPv4s, try two
-// different ones on 465, then fall back to 587/STARTTLS. First success wins.
-// Nothing is cached — a dead route can never stick. Auth rejections abort
-// immediately (retrying those is pointless).
-async function sendViaGmail(msg) {
-  const user = process.env.GMAIL_USER, pass = (process.env.GMAIL_PASS || '').replace(/\s+/g, '');
-  if (!user || !pass) return { ok: false, errs: ['no-creds'] };
-  let ips = [];
+// Email backup via Resend's HTTPS API. (Render free blocks outbound SMTP —
+// Gmail's 465 AND 587 both time out on every try — but HTTPS rides the same
+// healthy channel as web push.) Owner signs up at resend.com with their
+// Gmail, creates an API key → RESEND_API_KEY in Render env. Free tier sends
+// from onboarding@resend.dev to the account's own address — exactly our
+// self-notify case. Same skip rules, generic text, failures never break chat.
+async function sendViaResend(msg) {
+  const key = (process.env.RESEND_API_KEY || '').trim();
+  if (!key) return { ok: false, errs: ['no-key'] };
   try {
-    ips = await Promise.race([
-      dns.promises.resolve4('smtp.gmail.com'),
-      new Promise((_, rej) => setTimeout(() => rej(new Error('dns timeout')), 8000))
-    ]) || [];
-  } catch (e) { /* fall through to hostname attempt */ }
-  ips.sort(() => Math.random() - 0.5);
-  ips = ips.slice(0, 3);
-  if (!ips.length) ips = ['smtp.gmail.com'];
-  const attempts = [
-    ...ips.slice(0, 2).map(host => ({ host, port: 465, secure: true })),
-    { host: ips[ips.length - 1], port: 587, secure: false, requireTLS: true }
-  ];
-  const errs = [];
-  for (const a of attempts) {
-    try {
-      const t = nodemailer.createTransport({
-        host: a.host, servername: 'smtp.gmail.com', port: a.port, secure: a.secure,
-        requireTLS: a.requireTLS, auth: { user, pass }, tls: { servername: 'smtp.gmail.com' },
-        connectionTimeout: 10000, greetingTimeout: 10000, socketTimeout: 15000
-      });
-      await t.sendMail(msg);
-      try { t.close(); } catch {}
-      return { ok: true, via: a.port };
-    } catch (e) {
-      const detail = String((e && e.message) || e).slice(0, 28);
-      errs.push(a.port + ':' + detail);
-      if (/auth|login|pass|credential|534|535/i.test(detail)) break; // creds wrong — stop knocking
+    const r = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ from: 'Chat Boy AI <onboarding@resend.dev>', to: msg.to, subject: msg.subject, text: msg.text })
+    });
+    const body = await r.text();
+    if (r.ok) {
+      let id = '';
+      try { id = JSON.parse(body).id || ''; } catch {}
+      return { ok: true, via: 'resend', id };
     }
-  }
-  return { ok: false, errs };
+    return { ok: false, errs: ['http' + r.status + ':' + body.slice(0, 60)] };
+  } catch (e) { return { ok: false, errs: [String((e && e.message) || e).slice(0, 40)] }; }
 }
 async function mailPing(roomId, exceptSubId) {
   try {
-    if (!process.env.GMAIL_USER || !(process.env.GMAIL_PASS || '').replace(/\s+/g, '')) return;
+    if (!(process.env.RESEND_API_KEY || '').trim()) return;
     const list = subs[roomId] || [];
     const room = rooms.get(roomId);
     const looking = new Set();
@@ -246,10 +227,10 @@ async function mailPing(roomId, exceptSubId) {
     const targets = [...new Set(list.filter(s => s.em && s.subId !== exceptSubId && !looking.has(s.subId)).map(s => s.em))];
     if (!targets.length) return;
     for (const to of targets) {
-      const msg = { from: process.env.GMAIL_USER, to, subject: 'Chat Boy AI: new notification', text: 'You have a new notification.\n\n— Chat Boy AI (automated ping, do not reply)' };
-      const r = await sendViaGmail(msg);
+      const msg = { to, subject: 'Chat Boy AI: new notification', text: 'You have a new notification.\n\n— Chat Boy AI (automated ping, do not reply)' };
+      const r = await sendViaResend(msg);
       const who = '*@' + String(to).split('@')[1];
-      if (r.ok) console.log('[mail] sent to', who, 'via ' + r.via);
+      if (r.ok) console.log('[mail] sent to', who, 'via resend' + (r.id ? ' ' + r.id : ''));
       else console.warn('[mail] failed', who, (r.errs || []).join(' '));
     }
   } catch (e) { console.warn('[mail] error', String(e && e.message || e).slice(0, 80)); }
