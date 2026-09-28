@@ -55,6 +55,11 @@ Push notifications require **HTTPS**, so the app needs a permanent home:
    - ntfy backup needs NO env var and NO account: install the ntfy app →
      subscribe a secret topic → paste the same topic in the app's
      Family settings → Save
+   - WhatsApp backup (CallMeBot, free, personal use): WhatsApp the bot
+     number shown on callmebot.com — it changes sometimes — the line
+     "I allow callmebot to send me messages" → it replies your apikey →
+     paste phone (digits with country code, e.g. 91…) + apikey in the
+     app's Family settings → Save
 4. Render gives you a URL like `https://chat-boy-ai.onrender.com`.
    **That's the one link you share with your friend, once.** Done forever.
 5. (REQUIRED for Aisha + instant delivery) Stop cold-start sleeps: create a free **UptimeRobot**

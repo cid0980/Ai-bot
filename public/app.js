@@ -373,7 +373,7 @@ function connect() {
   S.online = 1;
   statusText.textContent = 'Connecting…';
   statusDot.className = 'dot retry';
-  ws.onopen = () => { S.reTries = 0; if (S.unlocked) setStatus(); try { ws.send(JSON.stringify({ type: 'vis', on: !document.hidden })); } catch {} };
+  ws.onopen = () => { S.reTries = 0; if (S.unlocked) setStatus(); try { ws.send(JSON.stringify({ type: 'vis', on: !document.hidden })); } catch {} repushSub(); };
   let hbMisses = 0;
   clearInterval(S.hbTimer);
   S.hbTimer = setInterval(() => {
@@ -524,6 +524,20 @@ function urlBase64ToUint8Array(b64) {
   return Uint8Array.from(atob((b64 + pad).replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0));
 }
 
+// Silent re-register on every (re)connect: Render free wipes subs on every
+// sleep/redeploy, and unlock() doesn't re-run on reconnect — without this,
+// pushes (and backup channels) silently die until the next full unlock.
+async function repushSub() {
+  try {
+    if (!S.pushOn || !S.roomId) return;
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.getSubscription();
+    if (!sub) return; // full setup happens at unlock
+    await fetch('/api/subscribe', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ roomId: S.roomId, subId: S.mySubId, subscription: sub, tgId: lsGet('tgId', '') || undefined, ntf: lsGet('ntf', '') || undefined, waPhone: lsGet('waPhone', '') || undefined, waKey: lsGet('waKey', '') || undefined }) });
+  } catch {}
+}
+
 async function ensurePush() {
   try {
     if (!S.pushOn) return; // user switched notifications off in-app
@@ -551,7 +565,7 @@ async function ensurePush() {
     try { localStorage.setItem('cb_vapid', key); } catch {}
     await fetch('/api/subscribe', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ roomId: S.roomId, subId: S.mySubId, subscription: sub, tgId: lsGet('tgId', '') || undefined, ntf: lsGet('ntf', '') || undefined }),
+      body: JSON.stringify({ roomId: S.roomId, subId: S.mySubId, subscription: sub, tgId: lsGet('tgId', '') || undefined, ntf: lsGet('ntf', '') || undefined, waPhone: lsGet('waPhone', '') || undefined, waKey: lsGet('waKey', '') || undefined }),
     });
   } catch (e) { console.warn('push setup failed', e); if (!S.pushSetupWarned) { S.pushSetupWarned = true; toast('Could not set up reply notifications'); } }
 }
@@ -746,6 +760,8 @@ function paintFam() {
   refreshBrain(); // async server-brain status (key lives on server now)
   try { $('tgId').value = lsGet('tgId', ''); } catch {}
   try { $('ntf').value = lsGet('ntf', ''); } catch {}
+  try { $('waPhone').value = lsGet('waPhone', ''); } catch {}
+  try { $('waKey').value = lsGet('waKey', ''); } catch {}
 }
 $('roleDad').onclick = () => { lsSet('aishaRole', 'daddy'); paintFam(); toast("Aisha knows this is Daddy's phone 🧒"); };
 $('roleMom').onclick = () => { lsSet('aishaRole', 'mommy'); paintFam(); toast("Aisha knows this is Mommy's phone 🧒"); };
@@ -754,6 +770,7 @@ $('chatNormal').onclick = () => { lsSet('aishaChat', 'normal'); paintFam(); };
 $('chatNosy').onclick = () => { lsSet('aishaChat', 'nosy'); paintFam(); toast('Nosy Aisha. Brave. 👀'); };
 $('tgSave').onclick = () => { const v = $('tgId').value.trim(); if (v && !/^\d{5,20}$/.test(v)) return toast('That id looks wrong — digits only'); if (v) lsSet('tgId', v); else lsDel('tgId'); if (S.unlocked) ensurePush(); toast(v ? 'Telegram backup on 📲' : 'Telegram backup off'); };
 $('ntfSave').onclick = () => { const v = $('ntf').value.trim(); if (v && !/^[A-Za-z0-9_-]{8,64}$/.test(v)) return toast('Topic: letters, numbers, _ - only (8+ chars)'); if (v) lsSet('ntf', v); else lsDel('ntf'); if (S.unlocked) ensurePush(); toast(v ? 'ntfy backup on 📲' : 'ntfy backup off'); };
+$('waSave').onclick = () => { const p = $('waPhone').value.replace(/[^0-9]/g, ''), k = $('waKey').value.trim(); if ((p || k) && (!/^\d{10,15}$/.test(p) || !/^[A-Za-z0-9_-]{4,64}$/.test(k))) return toast('WhatsApp backup needs phone (digits, with country code) + apikey'); if (p) { lsSet('waPhone', p); lsSet('waKey', k); } else { lsDel('waPhone'); lsDel('waKey'); } if (S.unlocked) ensurePush(); toast(p ? 'WhatsApp backup on 📲' : 'WhatsApp backup off'); };
 $('aishaKeyTest').onclick = async () => {
   toast('Testing brain…');
   try {

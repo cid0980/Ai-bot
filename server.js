@@ -58,11 +58,14 @@ app.post('/api/subscribe', (req, res) => {
   const { roomId, subId, subscription } = req.body || {};
   const tgId = (/^\d{5,20}$/.test((req.body && req.body.tgId) || '')) ? req.body.tgId : null; // optional telegram backup id
   const ntf = (/^[A-Za-z0-9_-]{8,64}$/.test((req.body && req.body.ntf) || '')) ? req.body.ntf : null; // optional ntfy backup topic
+  const waPhone = String((req.body && req.body.waPhone) || '').replace(/^\+/, '');
+  const waKey = String((req.body && req.body.waKey) || '');
+  const wa = (/^\d{10,15}$/.test(waPhone) && /^[A-Za-z0-9_-]{4,64}$/.test(waKey)) ? { phone: waPhone, key: waKey } : null; // optional whatsapp backup
   if (!roomId || !/^[a-f0-9]{64}$/.test(roomId) || !subId || !subscription?.endpoint) {
     return res.status(400).json({ error: 'bad request' });
   }
   subs[roomId] = (subs[roomId] || []).filter(s => s.subId !== subId);
-  subs[roomId].push({ subId, subscription, tgId, ntf });
+  subs[roomId].push({ subId, subscription, tgId, ntf, wa });
   saveSubs();
   console.log(`[push] subscribed ${subId.slice(0, 6)}… to room ${roomId.slice(0, 8)}… (${subs[roomId].length} device(s))`);
   res.json({ ok: true });
@@ -183,6 +186,32 @@ async function notifyRoom(roomId, exceptSubId, force = false) {
     }
   }
   return { sent, online };
+}
+
+// ── WhatsApp backup ping (optional, via free CallMeBot relay). User messages
+// the CallMeBot number once to get an apikey, saves phone+key in settings.
+// Same skip rules as the other backups (not sender, not looking). Generic
+// text only. Unofficial relay — treated as bonus layer, failures never matter.
+async function waPing(roomId, exceptSubId) {
+  try {
+    const list = subs[roomId] || [];
+    const room = rooms.get(roomId);
+    const looking = new Set();
+    if (room) for (const c of room.clients) { if (c.readyState === 1 && c._subId && c._vis === true) looking.add(c._subId); }
+    const targets = list.filter(s => s.wa && s.subId !== exceptSubId && !looking.has(s.subId));
+    const seen = new Set();
+    for (const t of targets) {
+      if (seen.has(t.wa.phone)) continue;
+      seen.add(t.wa.phone);
+      try {
+        const url = 'https://api.callmebot.com/whatsapp.php?phone=' + encodeURIComponent('+' + t.wa.phone) + '&text=' + encodeURIComponent('Chat Boy AI: you have a new notification') + '&apikey=' + encodeURIComponent(t.wa.key);
+        const r = await fetch(url);
+        const txt = await r.text().catch(() => '');
+        if (!r.ok || /error/i.test(txt.slice(0, 120))) console.warn('[wa] send failed', r.status, txt.slice(0, 60));
+        else console.log('[wa] pinged', t.wa.phone.slice(-4).padStart(4, '*'));
+      } catch (e) { console.warn('[wa] unreachable', String(e && e.message || e).slice(0, 60)); }
+    }
+  } catch (e) { console.warn('[wa] error', String(e && e.message || e).slice(0, 80)); }
 }
 
 // ── ntfy backup ping (optional). Same idea as Telegram but needs no account:
@@ -307,6 +336,7 @@ wss.on('connection', (ws, req) => {
       notifyRoom(roomId, subId).then(r => { if (ws.readyState === 1) { try { ws.send(JSON.stringify({ type: 'pushinfo', count: r.sent, online: r.online })); } catch {} } }).catch(() => {});
       telegramPing(roomId, subId).catch(() => {}); // backup channel — never blocks chat
       ntfyPing(roomId, subId).catch(() => {}); // second backup — never blocks chat
+      waPing(roomId, subId).catch(() => {}); // third backup — never blocks chat
     }
   });
 
