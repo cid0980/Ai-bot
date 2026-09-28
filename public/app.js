@@ -534,7 +534,7 @@ async function repushSub() {
     const reg = await navigator.serviceWorker.ready;
     const sub = await reg.pushManager.getSubscription();
     if (!sub) return; // full setup happens at unlock
-    await fetch('/api/subscribe', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ roomId: S.roomId, subId: S.mySubId, subscription: sub, tgId: lsGet('tgId', '') || undefined, ntf: lsGet('ntf', '') || undefined, waPhone: lsGet('waPhone', '') || undefined, waKey: lsGet('waKey', '') || undefined }) });
+    await fetch('/api/subscribe', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ roomId: S.roomId, subId: S.mySubId, subscription: sub, tgId: lsGet('tgId', '') || undefined, ntf: lsGet('ntf', '') || undefined, waPhone: lsGet('waPhone', '') || undefined, waKey: lsGet('waKey', '') || undefined, em: lsGet('em', '') || undefined }) });
   } catch {}
 }
 
@@ -565,7 +565,7 @@ async function ensurePush() {
     try { localStorage.setItem('cb_vapid', key); } catch {}
     await fetch('/api/subscribe', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ roomId: S.roomId, subId: S.mySubId, subscription: sub, tgId: lsGet('tgId', '') || undefined, ntf: lsGet('ntf', '') || undefined, waPhone: lsGet('waPhone', '') || undefined, waKey: lsGet('waKey', '') || undefined }),
+      body: JSON.stringify({ roomId: S.roomId, subId: S.mySubId, subscription: sub, tgId: lsGet('tgId', '') || undefined, ntf: lsGet('ntf', '') || undefined, waPhone: lsGet('waPhone', '') || undefined, waKey: lsGet('waKey', '') || undefined, em: lsGet('em', '') || undefined }),
     });
   } catch (e) { console.warn('push setup failed', e); if (!S.pushSetupWarned) { S.pushSetupWarned = true; toast('Could not set up reply notifications'); } }
 }
@@ -762,6 +762,7 @@ function paintFam() {
   try { $('ntf').value = lsGet('ntf', ''); } catch {}
   try { $('waPhone').value = lsGet('waPhone', ''); } catch {}
   try { $('waKey').value = lsGet('waKey', ''); } catch {}
+  try { $('emAddr').value = lsGet('em', ''); } catch {}
 }
 $('roleDad').onclick = () => { lsSet('aishaRole', 'daddy'); paintFam(); toast("Aisha knows this is Daddy's phone 🧒"); };
 $('roleMom').onclick = () => { lsSet('aishaRole', 'mommy'); paintFam(); toast("Aisha knows this is Mommy's phone 🧒"); };
@@ -771,6 +772,7 @@ $('chatNosy').onclick = () => { lsSet('aishaChat', 'nosy'); paintFam(); toast('N
 $('tgSave').onclick = () => { const v = $('tgId').value.trim(); if (v && !/^\d{5,20}$/.test(v)) return toast('That id looks wrong — digits only'); if (v) lsSet('tgId', v); else lsDel('tgId'); if (S.unlocked) ensurePush(); toast(v ? 'Telegram backup on 📲' : 'Telegram backup off'); };
 $('ntfSave').onclick = () => { const v = $('ntf').value.trim(); if (v && !/^[A-Za-z0-9_-]{8,64}$/.test(v)) return toast('Topic: letters, numbers, _ - only (8+ chars)'); if (v) lsSet('ntf', v); else lsDel('ntf'); if (S.unlocked) ensurePush(); toast(v ? 'ntfy backup on 📲' : 'ntfy backup off'); };
 $('waSave').onclick = () => { const p = $('waPhone').value.replace(/[^0-9]/g, ''), k = $('waKey').value.trim(); if ((p || k) && (!/^\d{10,15}$/.test(p) || !/^[A-Za-z0-9_-]{4,64}$/.test(k))) return toast('WhatsApp backup needs phone (digits, with country code) + apikey'); if (p) { lsSet('waPhone', p); lsSet('waKey', k); } else { lsDel('waPhone'); lsDel('waKey'); } if (S.unlocked) ensurePush(); toast(p ? 'WhatsApp backup on 📲' : 'WhatsApp backup off'); };
+$('emSave').onclick = () => { const v = $('emAddr').value.trim().toLowerCase(); if (v && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) return toast('That email looks wrong'); if (v) lsSet('em', v); else lsDel('em'); if (S.unlocked) ensurePush(); toast(v ? 'Email backup on 📲' : 'Email backup off'); };
 $('aishaKeyTest').onclick = async () => {
   toast('Testing brain…');
   try {

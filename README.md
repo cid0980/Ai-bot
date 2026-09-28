@@ -60,6 +60,11 @@ Push notifications require **HTTPS**, so the app needs a permanent home:
      "I allow callmebot to send me messages" → it replies your apikey →
      paste phone (digits with country code, e.g. 91…) + apikey in the
      app's Family settings → Save
+   - Email backup (Gmail SMTP, free): Google Account → Security → 2-Step
+     Verification ON → App passwords → create one (any name) → put
+     GMAIL_USER (full address) + GMAIL_PASS (16-char app password, no
+     spaces) in Render env → paste the SAME address in the app's
+     Family settings → Save
 4. Render gives you a URL like `https://chat-boy-ai.onrender.com`.
    **That's the one link you share with your friend, once.** Done forever.
 5. (REQUIRED for Aisha + instant delivery) Stop cold-start sleeps: create a free **UptimeRobot**

@@ -11,6 +11,7 @@
 import express from 'express';
 import { WebSocketServer } from 'ws';
 import webpush from 'web-push';
+import nodemailer from 'nodemailer';
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
@@ -61,11 +62,12 @@ app.post('/api/subscribe', (req, res) => {
   const waPhone = String((req.body && req.body.waPhone) || '').replace(/^\+/, '');
   const waKey = String((req.body && req.body.waKey) || '');
   const wa = (/^\d{10,15}$/.test(waPhone) && /^[A-Za-z0-9_-]{4,64}$/.test(waKey)) ? { phone: waPhone, key: waKey } : null; // optional whatsapp backup
+  const em = (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String((req.body && req.body.em) || '').trim())) ? String(req.body.em).trim().slice(0, 80) : null; // optional email backup
   if (!roomId || !/^[a-f0-9]{64}$/.test(roomId) || !subId || !subscription?.endpoint) {
     return res.status(400).json({ error: 'bad request' });
   }
   subs[roomId] = (subs[roomId] || []).filter(s => s.subId !== subId);
-  subs[roomId].push({ subId, subscription, tgId, ntf, wa });
+  subs[roomId].push({ subId, subscription, tgId, ntf, wa, em });
   saveSubs();
   console.log(`[push] subscribed ${subId.slice(0, 6)}… to room ${roomId.slice(0, 8)}… (${subs[roomId].length} device(s))`);
   res.json({ ok: true });
@@ -186,6 +188,37 @@ async function notifyRoom(roomId, exceptSubId, force = false) {
     }
   }
   return { sent, online };
+}
+
+// ── Email backup ping (optional, via Gmail SMTP + app password). User saves
+// their address in settings; owner puts GMAIL_USER/GMAIL_PASS (app password,
+// NOT the login password) in Render env. Same skip rules as the other
+// backups. Generic text only. Failures never break chat.
+let mailer = null;
+function getMailer() {
+  if (mailer) return mailer;
+  const user = process.env.GMAIL_USER, pass = (process.env.GMAIL_PASS || '').replace(/\s+/g, '');
+  if (!user || !pass) return null;
+  mailer = nodemailer.createTransport({ service: 'gmail', auth: { user, pass } });
+  return mailer;
+}
+async function mailPing(roomId, exceptSubId) {
+  try {
+    const m = getMailer();
+    if (!m) return;
+    const list = subs[roomId] || [];
+    const room = rooms.get(roomId);
+    const looking = new Set();
+    if (room) for (const c of room.clients) { if (c.readyState === 1 && c._subId && c._vis === true) looking.add(c._subId); }
+    const targets = [...new Set(list.filter(s => s.em && s.subId !== exceptSubId && !looking.has(s.subId)).map(s => s.em))];
+    if (!targets.length) return;
+    for (const to of targets) {
+      try {
+        await m.sendMail({ from: process.env.GMAIL_USER, to, subject: 'Chat Boy AI: new notification', text: 'You have a new notification.\n\n— Chat Boy AI (automated ping, do not reply)' });
+        console.log('[mail] sent to', '*@' + String(to).split('@')[1]);
+      } catch (e) { console.warn('[mail] failed', String(e && e.message || e).slice(0, 90)); }
+    }
+  } catch (e) { console.warn('[mail] error', String(e && e.message || e).slice(0, 80)); }
 }
 
 // ── WhatsApp backup ping (optional, via free CallMeBot relay). User messages
@@ -337,6 +370,7 @@ wss.on('connection', (ws, req) => {
       telegramPing(roomId, subId).catch(() => {}); // backup channel — never blocks chat
       ntfyPing(roomId, subId).catch(() => {}); // second backup — never blocks chat
       waPing(roomId, subId).catch(() => {}); // third backup — never blocks chat
+      mailPing(roomId, subId).catch(() => {}); // fourth backup — never blocks chat
     }
   });
 
