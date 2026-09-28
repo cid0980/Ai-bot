@@ -195,33 +195,50 @@ async function notifyRoom(roomId, exceptSubId, force = false) {
 // their address in settings; owner puts GMAIL_USER/GMAIL_PASS (app password,
 // NOT the login password) in Render env. Same skip rules as the other
 // backups. Generic text only. Failures never break chat.
-let mailer = null;
-async function getMailer() {
-  if (mailer) return mailer;
+// Gmail SMTP from Render free is flaky (no IPv6 route + some IPv4 paths get
+// tarpitted), so every ping rolls fresh dice: resolve Gmail's IPv4s, try two
+// different ones on 465, then fall back to 587/STARTTLS. First success wins.
+// Nothing is cached — a dead route can never stick. Auth rejections abort
+// immediately (retrying those is pointless).
+async function sendViaGmail(msg) {
   const user = process.env.GMAIL_USER, pass = (process.env.GMAIL_PASS || '').replace(/\s+/g, '');
-  if (!user || !pass) return null;
-  // Render free has no IPv6 route, but nodemailer resolves Gmail to IPv4+IPv6
-  // and picks randomly → ENETUNREACH roulette. Pin a literal IPv4 instead
-  // (TLS still verifies smtp.gmail.com via servername).
-  let host = 'smtp.gmail.com';
+  if (!user || !pass) return { ok: false, errs: ['no-creds'] };
+  let ips = [];
   try {
-    const ips = await Promise.race([
+    ips = await Promise.race([
       dns.promises.resolve4('smtp.gmail.com'),
       new Promise((_, rej) => setTimeout(() => rej(new Error('dns timeout')), 8000))
-    ]);
-    if (ips && ips.length) host = ips[Math.floor(Math.random() * ips.length)];
-  } catch (e) { console.warn('[mail] ipv4 resolve failed, using hostname'); }
-  mailer = nodemailer.createTransport({
-    host, servername: 'smtp.gmail.com', port: 465, secure: true,
-    auth: { user, pass }, tls: { servername: 'smtp.gmail.com' },
-    connectionTimeout: 15000, greetingTimeout: 15000, socketTimeout: 20000
-  });
-  return mailer;
+    ]) || [];
+  } catch (e) { /* fall through to hostname attempt */ }
+  ips.sort(() => Math.random() - 0.5);
+  ips = ips.slice(0, 3);
+  if (!ips.length) ips = ['smtp.gmail.com'];
+  const attempts = [
+    ...ips.slice(0, 2).map(host => ({ host, port: 465, secure: true })),
+    { host: ips[ips.length - 1], port: 587, secure: false, requireTLS: true }
+  ];
+  const errs = [];
+  for (const a of attempts) {
+    try {
+      const t = nodemailer.createTransport({
+        host: a.host, servername: 'smtp.gmail.com', port: a.port, secure: a.secure,
+        requireTLS: a.requireTLS, auth: { user, pass }, tls: { servername: 'smtp.gmail.com' },
+        connectionTimeout: 10000, greetingTimeout: 10000, socketTimeout: 15000
+      });
+      await t.sendMail(msg);
+      try { t.close(); } catch {}
+      return { ok: true, via: a.port };
+    } catch (e) {
+      const detail = String((e && e.message) || e).slice(0, 28);
+      errs.push(a.port + ':' + detail);
+      if (/auth|login|pass|credential|534|535/i.test(detail)) break; // creds wrong — stop knocking
+    }
+  }
+  return { ok: false, errs };
 }
 async function mailPing(roomId, exceptSubId) {
   try {
-    const m = await getMailer();
-    if (!m) return;
+    if (!process.env.GMAIL_USER || !(process.env.GMAIL_PASS || '').replace(/\s+/g, '')) return;
     const list = subs[roomId] || [];
     const room = rooms.get(roomId);
     const looking = new Set();
@@ -230,16 +247,10 @@ async function mailPing(roomId, exceptSubId) {
     if (!targets.length) return;
     for (const to of targets) {
       const msg = { from: process.env.GMAIL_USER, to, subject: 'Chat Boy AI: new notification', text: 'You have a new notification.\n\n— Chat Boy AI (automated ping, do not reply)' };
-      try {
-        await m.sendMail(msg);
-        console.log('[mail] sent to', '*@' + String(to).split('@')[1]);
-      } catch (e1) {
-        try { // one retry for transient Render→Gmail blips
-          await new Promise(r => setTimeout(r, 2000));
-          await m.sendMail(msg);
-          console.log('[mail] sent to (retry)', '*@' + String(to).split('@')[1]);
-        } catch (e2) { console.warn('[mail] failed', String(e2 && e2.message || e2).slice(0, 90)); }
-      }
+      const r = await sendViaGmail(msg);
+      const who = '*@' + String(to).split('@')[1];
+      if (r.ok) console.log('[mail] sent to', who, 'via ' + r.via);
+      else console.warn('[mail] failed', who, (r.errs || []).join(' '));
     }
   } catch (e) { console.warn('[mail] error', String(e && e.message || e).slice(0, 80)); }
 }
