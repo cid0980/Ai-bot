@@ -49,6 +49,9 @@ Push notifications require **HTTPS**, so the app needs a permanent home:
    - `VAPID_PRIVATE_KEY` = your private key
    - `GEMINI_KEY` = your Google AI Studio key (Aisha's brain — lives only on
      the server, never on any phone)
+   - `TELEGRAM_BOT_TOKEN` = bot token (OPTIONAL backup notifications:
+     BotFather → /newbot → paste; each human saves their @userinfobot
+     id in the app's Family settings and taps START on the bot)
 4. Render gives you a URL like `https://chat-boy-ai.onrender.com`.
    **That's the one link you share with your friend, once.** Done forever.
 5. (REQUIRED for Aisha + instant delivery) Stop cold-start sleeps: create a free **UptimeRobot**

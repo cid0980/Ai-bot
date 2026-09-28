@@ -17,3 +17,5 @@ services:
         sync: false
       - key: GEMINI_KEY
         sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false

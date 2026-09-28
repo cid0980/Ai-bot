@@ -373,7 +373,7 @@ function connect() {
   S.online = 1;
   statusText.textContent = 'Connecting…';
   statusDot.className = 'dot retry';
-  ws.onopen = () => { if (S.unlocked) setStatus(); try { ws.send(JSON.stringify({ type: 'vis', on: !document.hidden })); } catch {} };
+  ws.onopen = () => { S.reTries = 0; if (S.unlocked) setStatus(); try { ws.send(JSON.stringify({ type: 'vis', on: !document.hidden })); } catch {} };
   let hbMisses = 0;
   clearInterval(S.hbTimer);
   S.hbTimer = setInterval(() => {
@@ -452,7 +452,9 @@ function connect() {
     if (!S.unlocked) return;
     statusText.textContent = 'Reconnecting…';
     statusDot.className = 'dot retry';
-    setTimeout(() => S.unlocked && connect(), 2000);
+    S.reTries = (S.reTries || 0) + 1; // exponential backoff + jitter: calm on slow nets (2s→4s→8s…60s cap)
+    const wait = Math.min(60000, 2000 * Math.pow(2, S.reTries - 1)) + Math.floor(Math.random() * 1500);
+    setTimeout(() => S.unlocked && connect(), wait);
   };
   ws.onerror = () => { try { ws.close(); } catch {} };
 }
@@ -460,7 +462,7 @@ function connect() {
 function pokeIdle() {
   clearTimeout(S.idleTimer);
   if (!S.unlocked) return;
-  S.idleTimer = setTimeout(() => { lock('Session ended (idle too long).'); }, 5 * 60 * 1000);
+  S.idleTimer = setTimeout(() => { lock('Locked for safety — triple-tap the lock icon to jump back in'); }, 10 * 60 * 1000);
 }
 ['pointerdown', 'keydown'].forEach(e => addEventListener(e, pokeIdle, { passive: true }));
 
@@ -549,7 +551,7 @@ async function ensurePush() {
     try { localStorage.setItem('cb_vapid', key); } catch {}
     await fetch('/api/subscribe', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ roomId: S.roomId, subId: S.mySubId, subscription: sub }),
+      body: JSON.stringify({ roomId: S.roomId, subId: S.mySubId, subscription: sub, tgId: lsGet('tgId', '') || undefined }),
     });
   } catch (e) { console.warn('push setup failed', e); if (!S.pushSetupWarned) { S.pushSetupWarned = true; toast('Could not set up reply notifications'); } }
 }
@@ -738,12 +740,14 @@ function paintFam() {
   $('chatNormal').classList.toggle('sel', c.chat === 'normal');
   $('chatNosy').classList.toggle('sel', c.chat === 'nosy');
   refreshBrain(); // async server-brain status (key lives on server now)
+  try { $('tgId').value = lsGet('tgId', ''); } catch {}
 }
 $('roleDad').onclick = () => { lsSet('aishaRole', 'daddy'); paintFam(); toast("Aisha knows this is Daddy's phone 🧒"); };
 $('roleMom').onclick = () => { lsSet('aishaRole', 'mommy'); paintFam(); toast("Aisha knows this is Mommy's phone 🧒"); };
 $('chatQuiet').onclick = () => { lsSet('aishaChat', 'quiet'); paintFam(); };
 $('chatNormal').onclick = () => { lsSet('aishaChat', 'normal'); paintFam(); };
 $('chatNosy').onclick = () => { lsSet('aishaChat', 'nosy'); paintFam(); toast('Nosy Aisha. Brave. 👀'); };
+$('tgSave').onclick = () => { const v = $('tgId').value.trim(); if (v && !/^\d{5,20}$/.test(v)) return toast('That id looks wrong — digits only'); if (v) lsSet('tgId', v); else lsDel('tgId'); if (S.unlocked) ensurePush(); toast(v ? 'Telegram backup on 📲' : 'Telegram backup off'); };
 $('aishaKeyTest').onclick = async () => {
   toast('Testing brain…');
   try {

@@ -19,9 +19,8 @@ self.addEventListener('push', event => {
       body,
       icon: '/icon.svg',
       badge: '/icon.svg',
-      tag: 'chat-boy-msg',
-      renotify: true,
       vibrate: [70, 50, 70],
+      renotify: true,
     });
   })());
 });
