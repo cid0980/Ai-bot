@@ -361,7 +361,7 @@ function flushFailed() {
     failedQueue.delete(id);
     if (p.tries >= 3) continue;
     p.tries++;
-    try { S.ws.send(JSON.stringify({ type: 'msg', id, iv: p.iv, ct: p.ct, ...(p.kind ? { kind: p.kind } : {}) })); } catch {}
+    try { S.ws.send(JSON.stringify({ type: 'msg', id, iv: p.iv, ct: p.ct, sender: senderLabel(), ...(p.kind ? { kind: p.kind } : {}) })); } catch {}
     pendingAck.set(id, { iv: p.iv, ct: p.ct, kind: p.kind, tries: p.tries, timer: setTimeout(() => ackTimeout(id), 8000) });
   }
 }
@@ -593,6 +593,7 @@ const AISHA_DICE = { quiet: 0.03, normal: 0.10, nosy: 0.25 };
 const lsGet = (k, d = '') => { try { return localStorage.getItem(k) ?? d; } catch { return d; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch {} };
 const lsDel = k => { try { localStorage.removeItem(k); } catch {} };
+const senderLabel = () => { const r = lsGet('aishaRole', ''); return r === 'daddy' ? 'Daddy' : r === 'mommy' ? 'Mommy' : ''; };
 const aishaCfg = () => ({ role: lsGet('aishaRole'), chat: lsGet('aishaChat', 'normal'), key: lsGet('aishaKey') });
 let aishaLast = +(lsGet('aishaLast', '0')) || 0, aishaDay = lsGet('aishaDay'), aishaHours = [];
 let aishaBusy = false, aishaKeyWarned = false, aishaKeyBad = false, aishaRoleWarned = false, aishaFilterWarned = false, aishaRetryT = null, aishaLastErr = '';
@@ -722,7 +723,7 @@ async function aishaSend(text) {
   const { iv, ct } = await encryptPayload({ t: text, bot: 'Aisha' });
   if (!S.ws || S.ws.readyState !== 1) return;
   const id = (crypto.randomUUID ? crypto.randomUUID() : 'm' + Date.now().toString(36) + Math.random().toString(36).slice(2));
-  S.ws.send(JSON.stringify({ type: 'msg', id, iv, ct }));
+  S.ws.send(JSON.stringify({ type: 'msg', id, iv, ct, sender: 'Aisha' }));
   const rec = { text, mine: false, bot: 'Aisha', seen: true, acked: true, ts: Date.now() };
   S.msgIndex.set(id, rec);
   maybeDayDivider(rec.ts);
@@ -1263,7 +1264,7 @@ async function sendMedia(kind, blob, meta = {}) {
     const { iv, ct } = await encryptPayload(payload);
     if (ct.length > 2800000) return toast('File too large after encryption');
     const id = (crypto.randomUUID ? crypto.randomUUID() : 'm' + Date.now().toString(36) + Math.random().toString(36).slice(2));
-    S.ws.send(JSON.stringify({ type: 'msg', id, iv, ct, kind }));
+    S.ws.send(JSON.stringify({ type: 'msg', id, iv, ct, kind, sender: senderLabel() }));
     pendingAck.set(id, { iv, ct, kind, tries: 0, timer: setTimeout(() => ackTimeout(id), 8000) });
     const url = URL.createObjectURL(blob);
     S.blobUrls.add(url);
@@ -1454,7 +1455,7 @@ form.addEventListener('submit', async e => {
     const { iv, ct } = await encryptPayload(payload);
     if (S.ws && S.ws.readyState === 1) {
       const id = (crypto.randomUUID ? crypto.randomUUID() : 'm' + Date.now().toString(36) + Math.random().toString(36).slice(2));
-      S.ws.send(JSON.stringify({ type: 'msg', id, iv, ct }));
+      S.ws.send(JSON.stringify({ type: 'msg', id, iv, ct, sender: senderLabel() }));
       pendingAck.set(id, { iv, ct, kind: null, tries: 0, timer: setTimeout(() => ackTimeout(id), 8000) });
       const rec = { text, mine: true, replyTo: payload.replyTo || null, seen: false, acked: false, ts: Date.now() };
       S.msgIndex.set(id, rec);

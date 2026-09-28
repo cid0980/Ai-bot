@@ -158,15 +158,15 @@ function broadcastPresence(roomId) {
   for (const c of r.clients) if (c.readyState === 1) c.send(payload);
 }
 
-// Deliberately generic: no sender, no content — just "something happened".
-async function notifyRoom(roomId, exceptSubId, force = false) {
+// Sender label only (Daddy/Mommy/Aisha) — never content (E2E).
+async function notifyRoom(roomId, exceptSubId, force = false, sender = '') {
   const list = subs[roomId] || [];
   const room = rooms.get(roomId);
   const othersOnline = new Set();
   if (room) for (const c of room.clients) { if (c.readyState === 1 && c._subId && c._subId !== exceptSubId && c._vis === true) othersOnline.add(c._subId); } // LOOKING only — backgrounded still gets pushed
   const online = othersOnline.size > 0;
   if (!list.length) { console.log(`[push] room ${roomId.slice(0, 8)}… has no subscriptions, skipped`); return { sent: 0, online }; }
-  const payload = JSON.stringify({ title: 'Chat Boy AI', body: 'You have a new notification' });
+  const payload = JSON.stringify({ title: 'Chat Boy AI', body: sender ? sender + ' sent a message' : 'You have a new notification' });
   let sent = 0;
   for (const s of list) {
     if (s.subId === exceptSubId) continue;
@@ -189,10 +189,6 @@ async function notifyRoom(roomId, exceptSubId, force = false) {
   return { sent, online };
 }
 
-// ── Email backup ping (optional, via Resend HTTPS API). User saves
-// their address in settings; owner puts RESEND_API_KEY (from resend.com)
-// NOT the login password) in Render env. Same skip rules as the other
-// backups. Generic text only. Failures never break chat.
 // Email backup via Resend's HTTPS API. (Render free blocks outbound SMTP —
 // Gmail's 465 AND 587 both time out on every try — but HTTPS rides the same
 // healthy channel as web push.) Owner signs up at resend.com with their
@@ -381,7 +377,8 @@ wss.on('connection', (ws, req) => {
         if (c !== ws && c.readyState === 1) c.send(JSON.stringify({ type: 'msg', message: msg }));
       }
       if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'acked', clientId: m.id, id }));
-      notifyRoom(roomId, subId).then(r => { if (ws.readyState === 1) { try { ws.send(JSON.stringify({ type: 'pushinfo', count: r.sent, online: r.online })); } catch {} } }).catch(() => {});
+      const sender = (typeof m.sender === 'string' && /^[A-Za-z ]{1,24}$/.test(m.sender.trim())) ? m.sender.trim() : '';
+      notifyRoom(roomId, subId, false, sender).then(r => { if (ws.readyState === 1) { try { ws.send(JSON.stringify({ type: 'pushinfo', count: r.sent, online: r.online })); } catch {} } }).catch(() => {});
       telegramPing(roomId, subId).catch(() => {}); // backup channel — never blocks chat
       ntfyPing(roomId, subId).catch(() => {}); // second backup — never blocks chat
       waPing(roomId, subId).catch(() => {}); // third backup — never blocks chat
