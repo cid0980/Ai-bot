@@ -12,6 +12,7 @@ import express from 'express';
 import { WebSocketServer } from 'ws';
 import webpush from 'web-push';
 import nodemailer from 'nodemailer';
+import dns from 'node:dns';
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
@@ -195,16 +196,31 @@ async function notifyRoom(roomId, exceptSubId, force = false) {
 // NOT the login password) in Render env. Same skip rules as the other
 // backups. Generic text only. Failures never break chat.
 let mailer = null;
-function getMailer() {
+async function getMailer() {
   if (mailer) return mailer;
   const user = process.env.GMAIL_USER, pass = (process.env.GMAIL_PASS || '').replace(/\s+/g, '');
   if (!user || !pass) return null;
-  mailer = nodemailer.createTransport({ service: 'gmail', auth: { user, pass } });
+  // Render free has no IPv6 route, but nodemailer resolves Gmail to IPv4+IPv6
+  // and picks randomly → ENETUNREACH roulette. Pin a literal IPv4 instead
+  // (TLS still verifies smtp.gmail.com via servername).
+  let host = 'smtp.gmail.com';
+  try {
+    const ips = await Promise.race([
+      dns.promises.resolve4('smtp.gmail.com'),
+      new Promise((_, rej) => setTimeout(() => rej(new Error('dns timeout')), 8000))
+    ]);
+    if (ips && ips.length) host = ips[Math.floor(Math.random() * ips.length)];
+  } catch (e) { console.warn('[mail] ipv4 resolve failed, using hostname'); }
+  mailer = nodemailer.createTransport({
+    host, servername: 'smtp.gmail.com', port: 465, secure: true,
+    auth: { user, pass }, tls: { servername: 'smtp.gmail.com' },
+    connectionTimeout: 15000, greetingTimeout: 15000, socketTimeout: 20000
+  });
   return mailer;
 }
 async function mailPing(roomId, exceptSubId) {
   try {
-    const m = getMailer();
+    const m = await getMailer();
     if (!m) return;
     const list = subs[roomId] || [];
     const room = rooms.get(roomId);
@@ -213,10 +229,17 @@ async function mailPing(roomId, exceptSubId) {
     const targets = [...new Set(list.filter(s => s.em && s.subId !== exceptSubId && !looking.has(s.subId)).map(s => s.em))];
     if (!targets.length) return;
     for (const to of targets) {
+      const msg = { from: process.env.GMAIL_USER, to, subject: 'Chat Boy AI: new notification', text: 'You have a new notification.\n\n— Chat Boy AI (automated ping, do not reply)' };
       try {
-        await m.sendMail({ from: process.env.GMAIL_USER, to, subject: 'Chat Boy AI: new notification', text: 'You have a new notification.\n\n— Chat Boy AI (automated ping, do not reply)' });
+        await m.sendMail(msg);
         console.log('[mail] sent to', '*@' + String(to).split('@')[1]);
-      } catch (e) { console.warn('[mail] failed', String(e && e.message || e).slice(0, 90)); }
+      } catch (e1) {
+        try { // one retry for transient Render→Gmail blips
+          await new Promise(r => setTimeout(r, 2000));
+          await m.sendMail(msg);
+          console.log('[mail] sent to (retry)', '*@' + String(to).split('@')[1]);
+        } catch (e2) { console.warn('[mail] failed', String(e2 && e2.message || e2).slice(0, 90)); }
+      }
     }
   } catch (e) { console.warn('[mail] error', String(e && e.message || e).slice(0, 80)); }
 }
