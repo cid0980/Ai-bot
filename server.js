@@ -69,7 +69,7 @@ app.post('/api/subscribe', (req, res) => {
   subs[roomId].push({ subId, subscription, tgId, ntf, wa, em });
   saveSubs();
   console.log(`[push] subscribed ${subId.slice(0, 6)}… to room ${roomId.slice(0, 8)}… (${subs[roomId].length} device(s))`);
-  res.json({ ok: true });
+  res.json({ ok: true, subId, hasTg: !!tgId, hasNtf: !!ntf, hasWa: !!wa, hasEm: !!em });
 });
 
 app.post('/api/unsubscribe', (req, res) => {

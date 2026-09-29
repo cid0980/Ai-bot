@@ -387,8 +387,8 @@ function connect() {
     let m;
     try { m = JSON.parse(ev.data); } catch { return; }
     if (m.type === 'pushinfo') {
-      if (m.count > 0) { S.pushOffWarned = false; toast('Friend notified ✓'); }
-      else if (!m.online && !S.pushOffWarned) { S.pushOffWarned = true; toast("Friend has notifications off — they won't ping"); }
+      if (m.count > 0) { S.pushOffAt = 0; toast('Friend notified ✓'); }
+      else if (!m.online && (!S.pushOffAt || Date.now() - S.pushOffAt > 5 * 60 * 1000)) { S.pushOffAt = Date.now(); toast("Friend has notifications off — they won't ping"); }
       return;
     }
     if (m.type === 'pong') { hbMisses = 0; return; }
@@ -533,7 +533,7 @@ async function repushSub() {
     if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
     const reg = await navigator.serviceWorker.ready;
     const sub = await reg.pushManager.getSubscription();
-    if (!sub) return; // full setup happens at unlock
+    if (!sub) { ensurePush().catch(() => {}); return; } // nothing to re-post — run full setup instead (heals unlock-time failures on every reconnect)
     await fetch('/api/subscribe', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ roomId: S.roomId, subId: S.mySubId, subscription: sub, tgId: lsGet('tgId', '') || undefined, ntf: lsGet('ntf', '') || undefined, waPhone: lsGet('waPhone', '') || undefined, waKey: lsGet('waKey', '') || undefined, em: lsGet('em', '') || undefined }) });
   } catch {}
 }
@@ -563,11 +563,14 @@ async function ensurePush() {
       sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(key) });
     }
     try { localStorage.setItem('cb_vapid', key); } catch {}
-    await fetch('/api/subscribe', {
+    const echo = await (await fetch('/api/subscribe', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ roomId: S.roomId, subId: S.mySubId, subscription: sub, tgId: lsGet('tgId', '') || undefined, ntf: lsGet('ntf', '') || undefined, waPhone: lsGet('waPhone', '') || undefined, waKey: lsGet('waKey', '') || undefined, em: lsGet('em', '') || undefined }),
-    });
-  } catch (e) { console.warn('push setup failed', e); if (!S.pushSetupWarned) { S.pushSetupWarned = true; toast('Could not set up reply notifications'); } }
+    })).json();
+    S.subEcho = echo; S.subFailed = false; S.lastSubOk = Date.now();
+    try { renderAlerts(); } catch {}
+    return echo;
+  } catch (e) { console.warn('push setup failed', e); S.subFailed = true; try { renderAlerts(); } catch {} if (!S.pushSetupWarned) { S.pushSetupWarned = true; toast('Could not set up reply notifications'); } return null; }
 }
 
 // ── Unlock gesture: triple-tap the 🤖 logo ──
@@ -771,7 +774,7 @@ $('chatQuiet').onclick = () => { lsSet('aishaChat', 'quiet'); paintFam(); };
 $('chatNormal').onclick = () => { lsSet('aishaChat', 'normal'); paintFam(); };
 $('chatNosy').onclick = () => { lsSet('aishaChat', 'nosy'); paintFam(); toast('Nosy Aisha. Brave. 👀'); };
 $('tgSave').onclick = () => { const v = $('tgId').value.trim(); if (v && !/^\d{5,20}$/.test(v)) return toast('That id looks wrong — digits only'); if (v) lsSet('tgId', v); else lsDel('tgId'); if (S.unlocked) ensurePush(); toast(v ? 'Telegram backup on 📲' : 'Telegram backup off'); };
-$('ntfSave').onclick = () => { const v = $('ntf').value.trim(); if (v && !/^[A-Za-z0-9_-]{8,64}$/.test(v)) return toast('Topic: letters, numbers, _ - only (8+ chars)'); if (v) lsSet('ntf', v); else lsDel('ntf'); if (S.unlocked) ensurePush(); toast(v ? 'ntfy backup on 📲' : 'ntfy backup off'); };
+$('ntfSave').onclick = async () => { const v = $('ntf').value.trim(); if (v && !/^[A-Za-z0-9_-]{8,64}$/.test(v)) return toast('Topic: letters, numbers, _ - only (8+ chars)'); if (v) lsSet('ntf', v); else lsDel('ntf'); if (!v) return toast('ntfy backup off'); if (!S.unlocked) return toast('Saved — links when you unlock'); if (!S.pushOn) return toast('Saved — but bell is off, tap the bell'); const r = await ensurePush().catch(() => null); toast(r && r.hasNtf ? 'ntfy linked ✓' : 'Saved on phone — server not reached, reopen chat'); };
 $('waSave').onclick = () => { const p = $('waPhone').value.replace(/[^0-9]/g, ''), k = $('waKey').value.trim(); if ((p || k) && (!/^\d{10,15}$/.test(p) || !/^[A-Za-z0-9_-]{4,64}$/.test(k))) return toast('WhatsApp backup needs phone (digits, with country code) + apikey'); if (p) { lsSet('waPhone', p); lsSet('waKey', k); } else { lsDel('waPhone'); lsDel('waKey'); } if (S.unlocked) ensurePush(); toast(p ? 'WhatsApp backup on 📲' : 'WhatsApp backup off'); };
 $('emSave').onclick = () => { const v = $('emAddr').value.trim().toLowerCase(); if (v && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) return toast('That email looks wrong'); if (v) lsSet('em', v); else lsDel('em'); if (S.unlocked) ensurePush(); toast(v ? 'Email backup on 📲' : 'Email backup off'); };
 $('aishaKeyTest').onclick = async () => {
@@ -1508,6 +1511,8 @@ function renderAlerts() {
     rows.push({ text: 'Notifications are blocked — you will miss new messages.', btn: 'Fix', fn: fixNotif, danger: true });
   } else if (S.pushOn && perm === 'default') {
     rows.push({ text: 'Enable notifications to get new-message alerts.', btn: 'Enable', fn: fixNotif });
+  } else if (S.pushOn && perm === 'granted' && S.subFailed) {
+    rows.push({ text: 'Could not register for notifications — you may miss messages.', btn: 'Retry', fn: () => { ensurePush().catch(() => {}); }, danger: true });
   }
   // 2. Install nudge — every visit until installed (X hides it for this session only).
   if (!isInstalled() && !installDismissed) {
@@ -1570,6 +1575,10 @@ function checkNotif() {
 }
 document.addEventListener('visibilitychange', () => { if (!document.hidden) checkNotif(); });
 document.addEventListener('visibilitychange', () => { try { if (S.unlocked && S.ws && S.ws.readyState === 1) S.ws.send(JSON.stringify({ type: 'vis', on: !document.hidden })); } catch {} }); // tell server if we're LOOKING — push skip applies to lookers only
+// Subscription watchdog: re-register every 60s while unlocked if the last
+// registration is older than 5 min (or never succeeded). ensurePush is
+// idempotent — this heals pruned/dead subs within minutes, silently.
+setInterval(() => { try { if (S.unlocked && S.pushOn && Notification.permission === 'granted' && (!S.lastSubOk || Date.now() - S.lastSubOk > 5 * 60 * 1000)) ensurePush().catch(() => {}); } catch {} }, 60000);
 addEventListener('focus', checkNotif);
 setInterval(checkNotif, 30000);
 
