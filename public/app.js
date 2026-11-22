@@ -13,11 +13,13 @@ const chat = $('chat'), input = $('input'), form = $('composer');
 const statusText = $('statusText'), statusDot = document.querySelector('#status .dot');
 const lockBtn = $('lockBtn'), chips = $('chips');
 
-// ── State (the key lives in RAM only — never localStorage) ──
+// ── State (shared secret remains tab-only unless this device opts into auto-connect) ──
 const S = {
   unlocked: false,
   aishaEnabled: (() => { try { return localStorage.getItem('cb_aisha_enabled') !== 'off'; } catch { return true; } })(), // cached room-wide setting
   shakeLockOn: (() => { try { return localStorage.getItem('cb_shake_lock') !== 'off'; } catch { return true; } })(),
+  idleLockOn: (() => { try { return localStorage.getItem('cb_idle_lock') !== 'off'; } catch { return true; } })(),
+  autoConnectOn: (() => { try { return localStorage.getItem('cb_auto_connect') === 'on'; } catch { return false; } })(),
   key: null,        // CryptoKey (AES-GCM), derived from the secret
   roomId: null,     // sha256('room:' + secret) — the server only sees this
   ws: null,
@@ -750,7 +752,8 @@ function connect() {
 
 function pokeIdle() {
   clearTimeout(S.idleTimer);
-  if (!S.unlocked) return;
+  S.idleTimer = null;
+  if (!S.unlocked || !S.idleLockOn) return;
   S.idleTimer = setTimeout(() => { lock('Locked for safety — triple-tap the lock icon to jump back in'); }, 10 * 60 * 1000);
 }
 ['pointerdown', 'keydown'].forEach(e => addEventListener(e, pokeIdle, { passive: true }));
@@ -772,6 +775,7 @@ addEventListener('devicemotion', e => {
 async function unlock(secret) {
   const { key, roomId, code } = await deriveAll(secret);
   try { sessionStorage.setItem('cb_secret', secret); } catch {} // refresh-safe, dies with tab
+  if (S.autoConnectOn) lsSet('cb_auto_secret', secret); // keep the opt-in device key in sync with the active room
   S.key = key; S.roomId = roomId; S.unlocked = true;
   $('sessCode').textContent = code;
   $('sessInfo').classList.remove('hidden');
@@ -1083,6 +1087,10 @@ function paintFam() {
   $('aishaOff').classList.toggle('sel', !c.enabled);
   $('shakeOn').classList.toggle('sel', S.shakeLockOn);
   $('shakeOff').classList.toggle('sel', !S.shakeLockOn);
+  $('idleLockOn').classList.toggle('sel', S.idleLockOn);
+  $('idleLockOff').classList.toggle('sel', !S.idleLockOn);
+  $('autoConnectOn').classList.toggle('sel', S.autoConnectOn);
+  $('autoConnectOff').classList.toggle('sel', !S.autoConnectOn);
   $('chatQuiet').classList.toggle('sel', c.chat === 'quiet');
   $('chatNormal').classList.toggle('sel', c.chat === 'normal');
   $('chatNosy').classList.toggle('sel', c.chat === 'nosy');
@@ -1104,6 +1112,25 @@ $('aishaOn').onclick = () => setAishaEnabled(true);
 $('aishaOff').onclick = () => setAishaEnabled(false);
 $('shakeOn').onclick = () => { S.shakeLockOn = true; lsSet('cb_shake_lock', 'on'); paintFam(); };
 $('shakeOff').onclick = () => { S.shakeLockOn = false; lsSet('cb_shake_lock', 'off'); paintFam(); };
+$('idleLockOn').onclick = () => { S.idleLockOn = true; lsSet('cb_idle_lock', 'on'); pokeIdle(); paintFam(); };
+$('idleLockOff').onclick = () => { S.idleLockOn = false; lsSet('cb_idle_lock', 'off'); clearTimeout(S.idleTimer); S.idleTimer = null; paintFam(); };
+$('autoConnectOn').onclick = () => {
+  let secret = '';
+  try { secret = sessionStorage.getItem('cb_secret') || ''; } catch {}
+  if (!secret) return toast('Join the private session first, then enable auto-connect');
+  lsSet('cb_auto_secret', secret);
+  lsSet('cb_auto_connect', 'on');
+  S.autoConnectOn = true;
+  paintFam();
+  toast('This device will auto-connect when reopened');
+};
+$('autoConnectOff').onclick = () => {
+  S.autoConnectOn = false;
+  lsSet('cb_auto_connect', 'off');
+  lsDel('cb_auto_secret');
+  paintFam();
+  toast('Saved session key removed from this device');
+};
 $('chatQuiet').onclick = () => { lsSet('aishaChat', 'quiet'); paintFam(); };
 $('chatNormal').onclick = () => { lsSet('aishaChat', 'normal'); paintFam(); };
 $('chatNosy').onclick = () => { lsSet('aishaChat', 'nosy'); paintFam(); toast('Nosy Aisha. Brave. 👀'); };
@@ -2116,11 +2143,14 @@ paintBell();
 renderAlerts();
 checkNotif();
 
-// Refresh-safe session: the tab remembers the secret until it is closed.
-// (New tab / closed tab = locked again. Nothing is written to disk.)
-const savedSecret = sessionStorage.getItem('cb_secret');
+// Session secret is tab-scoped by default. Only an explicit device opt-in
+// stores a copy for automatic reconnect across app launches.
+const savedSecret = (S.autoConnectOn ? lsGet('cb_auto_secret') : '') || sessionStorage.getItem('cb_secret');
 if (savedSecret) {
   unlock(savedSecret)
-    .then(() => toast('Session restored'))
-    .catch(() => sessionStorage.removeItem('cb_secret'));
+    .then(() => toast(S.autoConnectOn ? 'Auto-connected to your saved session' : 'Session restored'))
+    .catch(() => {
+      sessionStorage.removeItem('cb_secret');
+      if (S.autoConnectOn) { lsDel('cb_auto_secret'); lsDel('cb_auto_connect'); S.autoConnectOn = false; }
+    });
 }
