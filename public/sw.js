@@ -24,7 +24,7 @@ self.addEventListener('push', event => {
         body,
         icon: '/icon-192.png',
         badge: '/icon-192.png',
-        vibrate: [100, 50, 100],
+        vibrate: [180, 80, 180, 80, 320],
         renotify: true,
         data: { url: '/' }
       });
