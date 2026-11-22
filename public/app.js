@@ -1467,13 +1467,35 @@ function chatBubbleMedia(id, who, rec) {
     }
   } else if (rec.kind === 'video') {
     if (rec.url) {
+      const player = document.createElement('div');
+      player.className = 'mediaVideoWrap';
       const v = document.createElement('video');
       v.className = 'mediaVideo';
       v.src = rec.url;
       v.controls = true;
       v.playsInline = true;
       v.preload = 'metadata';
-      d.appendChild(v);
+      v.setAttribute('playsinline', '');
+      v.setAttribute('aria-label', 'Video message');
+      const showFallback = () => {
+        if (player.querySelector('.mediaVideoError')) return;
+        const fallback = document.createElement('div');
+        fallback.className = 'mediaVideoError';
+        const message = document.createElement('span');
+        message.textContent = 'This video format could not play in your browser.';
+        const open = document.createElement('a');
+        open.href = rec.url;
+        open.target = '_blank';
+        open.rel = 'noopener';
+        open.textContent = 'Open video';
+        fallback.append(message, open);
+        player.appendChild(fallback);
+      };
+      v.addEventListener('error', showFallback);
+      v.addEventListener('playing', () => player.querySelector('.mediaVideoError')?.remove());
+      player.appendChild(v);
+      v.load();
+      d.appendChild(player);
     } else {
       const s = document.createElement('span');
       s.className = 'txt';
@@ -1608,8 +1630,8 @@ async function fileToJpeg(file, maxDim = 1280, q = 0.82) {
 async function sendMedia(kind, blob, meta = {}) {
   if (!S.unlocked) return false;
   const progress = meta.onProgress || (() => {});
-  const maxSize = kind === 'video' ? 12000000 : 2000000;
-  if (blob.size > maxSize) { progress('File too large'); toast(kind === 'video' ? 'Video too large (12 MB max)' : 'File too large (2 MB max)'); return false; }
+  const maxSize = kind === 'video' ? 20000000 : 2000000;
+  if (blob.size > maxSize) { progress('File too large'); toast(kind === 'video' ? 'Video too large (20 MB max)' : 'File too large (2 MB max)'); return false; }
   try {
     progress('Reading');
     const buf = await blob.arrayBuffer();
@@ -1618,7 +1640,7 @@ async function sendMedia(kind, blob, meta = {}) {
     if (S.replyTo) payload.replyTo = { id: S.replyTo.id, t: S.replyTo.t, mine: S.replyTo.mine };
     progress('Encrypting');
     const { iv, ct } = await encryptPayload(payload);
-    if (ct.length > 23000000) { progress('Too large'); toast('File too large after encryption'); return false; }
+    if (ct.length > 37000000) { progress('Too large'); toast('File too large after encryption'); return false; }
     const id = (crypto.randomUUID ? crypto.randomUUID() : 'm' + Date.now().toString(36) + Math.random().toString(36).slice(2));
     const url = URL.createObjectURL(blob);
     S.blobUrls.add(url);
@@ -1672,7 +1694,7 @@ function mediaType(file) {
 function renderMediaPreview() {
   const list = $('mediaPreviewList');
   list.replaceChildren();
-  $('previewSub').textContent = `${selectedMedia.length} item${selectedMedia.length === 1 ? '' : 's'} selected. Videos up to 12 MB; photos are compressed before sending.`;
+  $('previewSub').textContent = `${selectedMedia.length} item${selectedMedia.length === 1 ? '' : 's'} selected. Videos up to 20 MB; photos are compressed before sending.`;
   $('previewSend').textContent = `Send ${selectedMedia.length} item${selectedMedia.length === 1 ? '' : 's'}`;
   $('previewSend').disabled = !selectedMedia.length;
   selectedMedia.forEach((item, index) => {

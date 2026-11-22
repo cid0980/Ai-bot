@@ -135,7 +135,7 @@ const server = app.listen(PORT, '0.0.0.0', () =>
 );
 
 // ── Realtime relay. RAM only — a restart wipes every room instantly. ──
-const wss = new WebSocketServer({ server, path: '/ws' });
+const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 40_000_000 });
 const rooms = new Map(); // roomId -> { clients:Set, messages:[], wipeTimer }
 const aishaSettings = new Map(); // roomId -> persisted room-wide Aisha toggle
 const aishaSettingsPath = path.join(DATA, 'aisha-settings.json');
@@ -417,7 +417,7 @@ wss.on('connection', (ws, req) => {
     }
     if (m.type === 'msg' && typeof m.iv === 'string' && typeof m.ct === 'string') {
       const kind = (m.kind === 'img' || m.kind === 'audio' || m.kind === 'video') ? m.kind : null;
-      if (m.ct.length > (kind ? 23000000 : 20000)) return;
+      if (m.ct.length > (kind ? 37000000 : 20000)) return;
       // Client-generated id (lets the sender render + edit instantly).
       const id = (typeof m.id === 'string' && /^[A-Za-z0-9-]{8,64}$/.test(m.id)) ? m.id : crypto.randomUUID();
       const msg = { id, from: subId, iv: m.iv, ct: m.ct, ts: Date.now(), seenBy: [], ...(kind ? { kind } : {}) };

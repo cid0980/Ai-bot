@@ -245,7 +245,10 @@
   .previewActions .btn.secondary { background: var(--chip); color: var(--text); }
   .msg.media { padding: 4px; }
   .mediaImg { display: block; max-width: 100%; max-height: 320px; border-radius: 12px; cursor: pointer; }
-  .mediaVideo { display: block; width: min(100%, 420px); max-height: 320px; border-radius: 12px; background: #000; }
+  .mediaVideoWrap { position: relative; width: min(100%, 360px); min-width: min(72vw, 260px); overflow: hidden; border-radius: 12px; background: #000; }
+  .mediaVideo { display: block; width: 100%; aspect-ratio: 16 / 9; max-height: 320px; object-fit: contain; border-radius: 12px; background: #000; }
+  .mediaVideoError { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; padding: 10px 12px; background: var(--chip); color: var(--text); font-size: 11px; }
+  .mediaVideoError a { color: var(--accent-text); font-weight: 750; text-decoration: underline; }
   .aud { display: flex; align-items: center; gap: 8px; min-width: 180px; padding: 2px; }
   .audPlay { width: 32px; height: 32px; border-radius: 50%; border: 0; cursor: pointer; background: rgba(0,0,0,.18); color: inherit; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
   .msg.bot .audPlay { background: rgba(255,255,255,.14); }
