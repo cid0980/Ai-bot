@@ -151,12 +151,16 @@
   .msgBtn { display: flex; align-items: center; gap: 12px; width: 100%; background: none; border: 0; color: var(--text); font-size: 16px; padding: 14px 10px; border-radius: 12px; cursor: pointer; text-align: left; }
   .msgBtn:active { background: var(--chip); }
   #swipeHint { position: absolute; z-index: 6; font-size: 22px; opacity: 0; pointer-events: none; transition: opacity .1s; }
-  .seenMark { display: block; font-size: 10px; line-height: 1.25; opacity: .7; margin-top: 3px; text-align: right; white-space: normal; }
-  .seenMark.isSeen { opacity: 1; font-weight: 800; color: #278447; }
-  [data-theme="dark"] .seenMark.isSeen { color: #95d6a2; }
-  .seenMark.isSending { color: var(--muted); }
-  .seenMark.isFailed { color: #c93636; font-weight: 800; cursor: pointer; }
-  [data-theme="dark"] .seenMark.isFailed { color: #ff8c8c; }
+  .seenMark { display: flex; justify-content: flex-end; align-items: baseline; gap: 4px; font-size: 10px; line-height: 1.25; opacity: .76; margin: 4px 2px 0; text-align: right; white-space: normal; }
+  .seenMark .statusTime { color: var(--muted); font-weight: 400; }
+  .seenMark .statusState { color: var(--muted); }
+  .seenMark.isSeen .statusState, .seenMark.isSent .statusState { color: #278447; font-weight: 800; letter-spacing: -.4px; }
+  [data-theme="dark"] .seenMark.isSeen .statusState, [data-theme="dark"] .seenMark.isSent .statusState { color: #95d6a2; }
+  .seenMark.isSeen, .seenMark.isSent { opacity: 1; }
+  .seenMark.isSending .statusState { color: var(--muted); }
+  .seenMark.isFailed { opacity: 1; cursor: pointer; }
+  .seenMark.isFailed .statusState { color: #c93636; font-weight: 800; }
+  [data-theme="dark"] .seenMark.isFailed .statusState { color: #ff8c8c; }
   .icon-btn svg { width: 20px; height: 20px; display: block; }
   .logo svg { width: 26px; height: 26px; display: block; }
   .msg.bot, .msg.me { box-shadow: 0 1px 3px rgba(0,0,0,.28); }

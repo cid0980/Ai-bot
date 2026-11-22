@@ -104,18 +104,25 @@ function maybeDayDivider(ts) {
   el.textContent = dayLabel(ts);
   chat.appendChild(el);
 }
-function tickText(rec) {
-  const state = rec.failed ? 'Not sent · Tap to retry' : rec.seen ? 'Seen ✓✓' : rec.acked ? 'Sent ✓' : 'Sending…';
-  return rec.ts ? fmtTime(rec.ts) + ' · ' + state : state;
-}
 function paintStatus(row, rec) {
   const el = row.querySelector('.seenMark');
-  if (el) {
-    el.textContent = tickText(rec);
-    el.classList.toggle('isSeen', !!rec.seen);
-    el.classList.toggle('isFailed', !!rec.failed);
-    el.classList.toggle('isSending', !rec.acked && !rec.failed);
+  if (!el) return;
+  el.replaceChildren();
+  if (rec.ts) {
+    const time = document.createElement('span');
+    time.className = 'statusTime';
+    time.textContent = fmtTime(rec.ts);
+    el.appendChild(time);
   }
+  if (rec.ts) el.appendChild(document.createTextNode(' · '));
+  const state = document.createElement('span');
+  state.className = 'statusState';
+  state.textContent = rec.failed ? 'Not sent · Tap to retry' : rec.seen ? '✓✓' : rec.acked ? '✓' : 'Sending…';
+  el.appendChild(state);
+  el.classList.toggle('isSeen', !!rec.seen);
+  el.classList.toggle('isSent', !!rec.acked && !rec.seen && !rec.failed);
+  el.classList.toggle('isFailed', !!rec.failed);
+  el.classList.toggle('isSending', !rec.acked && !rec.failed);
 }
 function setBadge(n) {
   try {
