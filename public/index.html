@@ -171,8 +171,7 @@
   .seenMark { display: flex; justify-content: flex-end; align-items: baseline; gap: 4px; font-size: 10px; line-height: 1.25; opacity: 1; margin: 4px 2px 0; text-align: right; white-space: normal; }
   .seenMark .statusTime { color: var(--accent-ink); opacity: .82; font-weight: 500; }
   .seenMark .statusState { color: var(--muted); }
-  .seenMark.isSeen .statusState, .seenMark.isSent .statusState { color: #278447; font-weight: 800; letter-spacing: -.4px; }
-  [data-theme="dark"] .seenMark.isSeen .statusState, [data-theme="dark"] .seenMark.isSent .statusState { color: #95d6a2; }
+  .seenMark.isSeen .statusState, .seenMark.isSent .statusState { display: inline-block; padding: 1px 4px; border-radius: 6px; background: rgba(0,0,0,.28); color: #63f596; font-weight: 900; letter-spacing: -.4px; text-shadow: 0 0 2px rgba(0,0,0,.45); }
   .seenMark.isSeen, .seenMark.isSent { opacity: 1; }
   .seenMark.isSending .statusState { color: var(--muted); }
   .seenMark.isFailed { opacity: 1; cursor: pointer; }
