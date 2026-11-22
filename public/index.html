@@ -247,8 +247,16 @@
   .mediaImg { display: block; max-width: 100%; max-height: 320px; border-radius: 12px; cursor: pointer; }
   .mediaVideoWrap { position: relative; width: min(100%, 360px); min-width: min(72vw, 260px); overflow: hidden; border-radius: 12px; background: #000; }
   .mediaVideo { display: block; width: 100%; aspect-ratio: 16 / 9; max-height: 320px; object-fit: contain; border-radius: 12px; background: #000; }
-  .mediaVideoError { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; padding: 10px 12px; background: var(--chip); color: var(--text); font-size: 11px; }
-  .mediaVideoError a { color: var(--accent-text); font-weight: 750; text-decoration: underline; }
+  .mediaVideoPlay { position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%); width: 54px; height: 54px; border: 1px solid rgba(255,255,255,.65); border-radius: 50%; display: grid; place-items: center; background: rgba(15,12,16,.72); color: white; cursor: pointer; box-shadow: 0 3px 16px rgba(0,0,0,.3); }
+  .mediaVideoPlay:active { transform: translate(-50%,-50%) scale(.94); }
+  .mediaVideoPlay svg { width: 24px; height: 24px; fill: currentColor; margin-left: 3px; }
+  .mediaVideoWrap.isPlaying .mediaVideoPlay { display: none; }
+  .mediaVideoDuration { position: absolute; right: 8px; bottom: 8px; border-radius: 5px; padding: 2px 6px; background: rgba(0,0,0,.75); color: #fff; font-size: 10px; font-variant-numeric: tabular-nums; pointer-events: none; }
+  .mediaVideoWrap.isPlaying .mediaVideoDuration, .mediaVideoWrap.hasError .mediaVideoDuration, .mediaVideoWrap.hasError .mediaVideoPlay { display: none; }
+  .mediaVideoWrap.hasError .mediaVideo { display: none; }
+  .mediaVideoError { display: flex; flex-direction: column; align-items: flex-start; gap: 5px; padding: 11px 12px; background: var(--chip); color: var(--text); font-size: 11px; }
+  .mediaVideoError span { line-height: 1.4; }
+  .mediaVideoError a { display: inline-flex; padding: 6px 10px; border-radius: 999px; background: var(--accent); color: var(--accent-ink); font-weight: 750; text-decoration: none; }
   .aud { display: flex; align-items: center; gap: 8px; min-width: 180px; padding: 2px; }
   .audPlay { width: 32px; height: 32px; border-radius: 50%; border: 0; cursor: pointer; background: rgba(0,0,0,.18); color: inherit; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
   .msg.bot .audPlay { background: rgba(255,255,255,.14); }

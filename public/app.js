@@ -1479,6 +1479,7 @@ function chatBubbleMedia(id, who, rec) {
       v.setAttribute('aria-label', 'Video message');
       const showFallback = () => {
         if (player.querySelector('.mediaVideoError')) return;
+        player.classList.add('hasError');
         const fallback = document.createElement('div');
         fallback.className = 'mediaVideoError';
         const message = document.createElement('span');
@@ -1491,9 +1492,26 @@ function chatBubbleMedia(id, who, rec) {
         fallback.append(message, open);
         player.appendChild(fallback);
       };
+      const play = document.createElement('button');
+      play.type = 'button';
+      play.className = 'mediaVideoPlay';
+      play.setAttribute('aria-label', 'Play video');
+      play.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13l11-6.5z"/></svg>';
+      play.addEventListener('click', e => {
+        e.preventDefault(); e.stopPropagation();
+        if (v.paused) v.play().catch(showFallback);
+      });
+      const duration = document.createElement('span');
+      duration.className = 'mediaVideoDuration';
+      duration.textContent = rec.dur ? fmtDur(rec.dur) : 'Video';
+      v.addEventListener('loadedmetadata', () => {
+        if (Number.isFinite(v.duration) && v.duration > 0) duration.textContent = fmtDur(v.duration);
+      });
       v.addEventListener('error', showFallback);
-      v.addEventListener('playing', () => player.querySelector('.mediaVideoError')?.remove());
-      player.appendChild(v);
+      v.addEventListener('playing', () => { player.classList.remove('hasError'); player.classList.add('isPlaying'); player.querySelector('.mediaVideoError')?.remove(); });
+      v.addEventListener('pause', () => player.classList.remove('isPlaying'));
+      v.addEventListener('ended', () => player.classList.remove('isPlaying'));
+      player.append(v, play, duration);
       v.load();
       d.appendChild(player);
     } else {
