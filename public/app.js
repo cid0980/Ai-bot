@@ -17,9 +17,14 @@ const lockBtn = $('lockBtn'), chips = $('chips');
 const S = {
   unlocked: false,
   aishaEnabled: (() => { try { return localStorage.getItem('cb_aisha_enabled') !== 'off'; } catch { return true; } })(), // cached room-wide setting
+  shakeLockOn: (() => { try { return localStorage.getItem('cb_shake_lock') !== 'off'; } catch { return true; } })(),
   key: null,        // CryptoKey (AES-GCM), derived from the secret
   roomId: null,     // sha256('room:' + secret) — the server only sees this
   ws: null,
+  reconnectTimer: null,
+  connectTimer: null,
+  stableTimer: null,
+  cacheIds: [],
   mySubId: localStorage.getItem('cb_sub') || (() => {
     const v = Math.random().toString(36).slice(2) + Date.now().toString(36);
     localStorage.setItem('cb_sub', v);
@@ -230,6 +235,120 @@ async function decryptPayload(ivB64, ctB64) {
   return JSON.parse(dec.decode(pt)); // { t, replyTo? }
 }
 
+// Local cache stores ciphertext only. It makes reconnects instant for messages
+// already seen on this device; the server remains authoritative and prunes stale IDs.
+let cacheDbPromise = null;
+function openMessageCache() {
+  if (!('indexedDB' in window)) return Promise.reject(new Error('IndexedDB unavailable'));
+  if (cacheDbPromise) return cacheDbPromise;
+  cacheDbPromise = new Promise((resolve, reject) => {
+    const req = indexedDB.open('chatboy-encrypted-cache-v1', 1);
+    req.onupgradeneeded = () => {
+      const store = req.result.createObjectStore('messages', { keyPath: 'key' });
+      store.createIndex('room', 'roomId', { unique: false });
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error || new Error('cache open failed'));
+    req.onblocked = () => reject(new Error('cache open blocked'));
+  });
+  return cacheDbPromise;
+}
+function purgeExpiredCache() {
+  if (!cacheDbPromise) return;
+  cacheDbPromise.then(db => new Promise(resolve => {
+    const tx = db.transaction('messages', 'readwrite');
+    const req = tx.objectStore('messages').openCursor();
+    const cutoff = Date.now() - 60 * 60 * 1000;
+    req.onsuccess = () => {
+      const cur = req.result;
+      if (!cur) return;
+      if (!cur.value.message.ts || cur.value.message.ts < cutoff) cur.delete();
+      cur.continue();
+    };
+    tx.oncomplete = resolve;
+    tx.onerror = resolve;
+    tx.onabort = resolve;
+  })).catch(() => {});
+}
+setInterval(purgeExpiredCache, 60_000);
+async function loadCachedMessages(roomId) {
+  const db = await openMessageCache();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('messages', 'readwrite');
+    const store = tx.objectStore('messages');
+    const req = store.index('room').getAll(roomId);
+    let messages = [];
+    req.onsuccess = () => {
+      const cutoff = Date.now() - 60 * 60 * 1000;
+      for (const row of req.result) {
+        if (row.message.ts >= cutoff) messages.push(row.message);
+        else store.delete(row.key);
+      }
+      messages.sort((a, b) => a.ts - b.ts);
+    };
+    req.onerror = () => reject(req.error || new Error('cache read failed'));
+    tx.oncomplete = () => resolve(messages);
+    tx.onerror = () => reject(tx.error || new Error('cache read failed'));
+  });
+}
+async function mergeCachedMessages(roomId, incoming = [], allIds = null, seenIds = null) {
+  try {
+    const db = await openMessageCache();
+    if (!Array.isArray(allIds) && !Array.isArray(seenIds)) {
+      await new Promise((resolve, reject) => {
+        const tx = db.transaction('messages', 'readwrite');
+        const store = tx.objectStore('messages');
+        for (const m of incoming) if (m && m.id) store.put({ key: roomId + ':' + m.id, roomId, message: m });
+        tx.oncomplete = resolve;
+        tx.onerror = () => reject(tx.error || new Error('cache write failed'));
+        tx.onabort = () => reject(tx.error || new Error('cache write aborted'));
+      });
+      S.cacheIds = [...new Set([...S.cacheIds, ...incoming.filter(m => m && m.id).map(m => m.id)])].slice(-200);
+      return;
+    }
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction('messages', 'readwrite');
+      const store = tx.objectStore('messages');
+      const req = store.index('room').getAll(roomId);
+      req.onsuccess = () => {
+        const byId = new Map(req.result.map(x => [x.message.id, x.message]));
+        const cutoff = Date.now() - 60 * 60 * 1000;
+        for (const [id, m] of byId) if (!m.ts || m.ts < cutoff) byId.delete(id);
+        if (Array.isArray(allIds)) {
+          const live = new Set(allIds);
+          for (const [id, m] of byId) {
+            if (!live.has(id) && !m.pending) byId.delete(id);
+            else if (live.has(id)) m.pending = false;
+          }
+        }
+        for (const m of incoming) if (m && m.id) byId.set(m.id, { ...m, pending: false });
+        if (Array.isArray(seenIds)) {
+          const seen = new Set(seenIds);
+          for (const [id, m] of byId) m.seen = seen.has(id);
+        }
+        const sorted = [...byId.values()].sort((a, b) => a.ts - b.ts);
+        const keep = [];
+        let bytes = 0;
+        for (let i = sorted.length - 1; i >= 0 && keep.length < 200; i--) {
+          const m = sorted[i], size = (m.ct || '').length;
+          if (bytes + size > 50_000_000) continue;
+          keep.push(m); bytes += size;
+        }
+        const clear = store.index('room').openKeyCursor(roomId);
+        clear.onsuccess = () => {
+          const cur = clear.result;
+          if (cur) { store.delete(cur.primaryKey); cur.continue(); }
+          else for (const m of keep) store.put({ key: roomId + ':' + m.id, roomId, message: m });
+        };
+      };
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error || new Error('cache write failed'));
+      tx.onabort = () => reject(tx.error || new Error('cache write aborted'));
+    });
+    S.cacheIds = (await loadCachedMessages(roomId)).map(m => m.id);
+  } catch { /* private browsing/quota errors must never break chat */ }
+}
+
 // ── Real chat (unlocked mode) ──
 function setStatus() {
   if (!S.unlocked) { statusText.textContent = 'Always here to help'; statusDot.className = 'dot'; return; }
@@ -290,12 +409,13 @@ function chatBubbleAisha(id, rec) {
   return d;
 }
 
-async function renderMessage(m, who) {
+async function renderMessage(m, who, predecoded) {
   try {
-    const p = await decryptPayload(m.iv, m.ct);
+    const p = predecoded === undefined ? await decryptPayload(m.iv, m.ct) : predecoded;
+    if (!p) throw new Error('decrypt failed');
     maybeDayDivider(m.ts);
-    if (p.kind === 'img' || p.kind === 'audio') {
-      const rec = { text: p.kind === 'img' ? 'Photo' : 'Voice note', kind: p.kind, mime: p.mime,
+    if (p.kind === 'img' || p.kind === 'audio' || p.kind === 'video') {
+      const rec = { text: p.kind === 'img' ? 'Photo' : p.kind === 'video' ? 'Video' : 'Voice note', kind: p.kind, mime: p.mime,
         dur: p.dur || 0, mine: who === 'me', replyTo: p.replyTo || null, seen: !!m.seen, acked: true, ts: m.ts, url: null };
       try {
         const bytes = b64d(p.data);
@@ -320,6 +440,65 @@ async function renderMessage(m, who) {
     bubble('🔒 Couldn\'t decrypt — wrong secret?', 'sys', false);
   }
 }
+
+async function renderHistoryMessages(messages) {
+  for (let i = 0; i < messages.length; i += 4) {
+    const batch = messages.slice(i, i + 4);
+    const fresh = [];
+    for (const m of batch) {
+      const old = S.msgIndex.get(m.id);
+      if (!old) { fresh.push(m); continue; }
+      if (old.mine && m.seen && !old.seen) {
+        old.seen = true;
+        old.acked = true;
+        const row = chat.querySelector(`.msg[data-id="${CSS.escape(m.id)}"]`);
+        if (row) paintStatus(row, old);
+      }
+      if (m.edited) await applyEdit(m);
+    }
+    const decoded = await Promise.all(fresh.map(m => decryptPayload(m.iv, m.ct).catch(() => null)));
+    for (let j = 0; j < fresh.length; j++) {
+      await renderMessage(fresh[j], fresh[j].from === S.mySubId ? 'me' : 'bot', decoded[j]);
+    }
+  }
+}
+function reorderChatHistory() {
+  const fixed = Array.from(chat.children).filter(el => !el.classList.contains('dayDiv') && !el.dataset.id);
+  const rows = Array.from(chat.querySelectorAll('.msg[data-id]'));
+  rows.sort((a, b) => (S.msgIndex.get(a.dataset.id)?.ts || 0) - (S.msgIndex.get(b.dataset.id)?.ts || 0));
+  chat.replaceChildren();
+  fixed.forEach(el => chat.appendChild(el));
+  S.lastDayStart = null;
+  for (const row of rows) {
+    const rec = S.msgIndex.get(row.dataset.id);
+    if (rec) maybeDayDivider(rec.ts);
+    chat.appendChild(row);
+  }
+}
+function pruneChatToIds(ids) {
+  const live = new Set(ids || []), cutoff = Date.now() - 60 * 60 * 1000;
+  let changed = false;
+  for (const [id, rec] of S.msgIndex) {
+    const expired = !rec.ts || rec.ts < cutoff;
+    if (live.has(id) || (!expired && (pendingAck.has(id) || failedQueue.has(id)))) continue;
+    clearPending(id);
+    const row = chat.querySelector(`.msg[data-id="${CSS.escape(id)}"]`);
+    if (row) row.remove();
+    if (rec.url) { URL.revokeObjectURL(rec.url); S.blobUrls.delete(rec.url); }
+    S.msgIndex.delete(id);
+    changed = true;
+  }
+  if (changed) reorderChatHistory();
+}
+setInterval(() => {
+  if (!S.unlocked || !S.roomId) return;
+  const cutoff = Date.now() - 60 * 60 * 1000;
+  const live = [...S.msgIndex].filter(([, rec]) => rec.ts >= cutoff).map(([id]) => id);
+  if (live.length !== S.msgIndex.size) {
+    pruneChatToIds(live);
+    mergeCachedMessages(S.roomId, [], live, null);
+  }
+}, 30_000);
 
 // Incoming edit from the friend: swap text in place.
 async function applyEdit(m) {
@@ -350,31 +529,67 @@ function ackTimeout(id) {
   pendingAck.delete(id);
   const rec = S.msgIndex.get(id);
   if (!rec || rec.acked) return;
-  if (p && p.tries < 3) failedQueue.set(id, p);
+  if (p) {
+    failedQueue.set(id, p);
+    if (p.tries < 5) setTimeout(flushFailed, 250); // retry on a live but flaky socket too, not only after reconnect
+  }
   rec.failed = true;
   const row = chat.querySelector(`.msg[data-id="${CSS.escape(id)}"]`);
-  if (row) row.classList.add('failed');
+  if (row) { row.classList.add('failed'); row.title = 'Not delivered — tap to retry'; }
   if (Date.now() - (S.lastFailToast || 0) > 10000) { S.lastFailToast = Date.now(); toast('Not delivered — will retry on reconnect'); }
 }
 function flushFailed() {
   if (!S.unlocked || !S.ws || S.ws.readyState !== 1 || !failedQueue.size) return;
   for (const [id, p] of failedQueue) {
+    if (p.tries >= 5) continue;
     failedQueue.delete(id);
-    if (p.tries >= 3) continue;
     p.tries++;
-    try { S.ws.send(JSON.stringify({ type: 'msg', id, iv: p.iv, ct: p.ct, sender: senderLabel(), ...(p.kind ? { kind: p.kind } : {}) })); } catch {}
+    try { S.ws.send(JSON.stringify({ type: 'msg', id, iv: p.iv, ct: p.ct, sender: senderLabel(), ...(p.kind ? { kind: p.kind } : {}) })); } catch { failedQueue.set(id, p); continue; }
+    const row = chat.querySelector(`.msg[data-id="${CSS.escape(id)}"]`);
+    if (row) { row.classList.remove('failed'); row.title = ''; }
     pendingAck.set(id, { iv: p.iv, ct: p.ct, kind: p.kind, tries: p.tries, timer: setTimeout(() => ackTimeout(id), 8000) });
   }
 }
+chat.addEventListener('click', e => {
+  const row = e.target.closest('.msg.failed[data-id]');
+  if (!row || e.target.closest('button, video, audio')) return;
+  const item = failedQueue.get(row.dataset.id);
+  if (!item) return;
+  item.tries = 0;
+  toast('Retrying message…');
+  flushFailed();
+});
 function connect() {
-  try { if (S.ws) S.ws.close(); } catch {} // stale socket → dup messages
+  if (!S.unlocked || !S.roomId) return;
+  clearTimeout(S.reconnectTimer); S.reconnectTimer = null;
+  clearTimeout(S.connectTimer); S.connectTimer = null;
+  clearTimeout(S.stableTimer); S.stableTimer = null;
+  const old = S.ws;
+  S.ws = null; // invalidate the old socket before closing; its close event must not schedule another reconnect
+  try { if (old) { old.onclose = null; old.onerror = null; old.close(); } } catch {}
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   const ws = new WebSocket(`${proto}://${location.host}/ws?room=${S.roomId}&sub=${S.mySubId}`);
   S.ws = ws;
+  S.connectTimer = setTimeout(() => {
+    if (ws === S.ws && ws.readyState === 0) { try { ws.close(); } catch {} }
+  }, 25000); // a stalled handshake must enter the normal backoff/retry path
   S.online = 1;
   statusText.textContent = 'Connecting…';
   statusDot.className = 'dot retry';
-  ws.onopen = () => { S.reTries = 0; if (S.unlocked) setStatus(); try { ws.send(JSON.stringify({ type: 'vis', on: !document.hidden })); } catch {} repushSub(); };
+  ws.onopen = () => {
+    if (ws !== S.ws || !S.unlocked) { try { ws.close(); } catch {} return; }
+    clearTimeout(S.connectTimer); S.connectTimer = null;
+    if (S.unlocked) setStatus();
+    // Only reset backoff after the socket has stayed healthy for a while;
+    // flapping networks must not fall back to rapid 2-second retries.
+    S.stableTimer = setTimeout(() => { if (ws === S.ws && ws.readyState === 1) S.reTries = 0; }, 15000);
+    try {
+      ws.send(JSON.stringify({ type: 'vis', on: !document.hidden }));
+      const known = [...new Set([...S.cacheIds, ...S.msgIndex.keys()])].slice(-200);
+      ws.send(JSON.stringify({ type: 'sync', known }));
+    } catch {}
+    repushSub();
+  };
   let hbMisses = 0;
   clearInterval(S.hbTimer);
   S.hbTimer = setInterval(() => {
@@ -385,6 +600,7 @@ function connect() {
     try { ws.send(JSON.stringify({ type: 'ping', vis: !document.hidden })); } catch {}
   }, 25000);
   ws.onmessage = async ev => {
+    if (ws !== S.ws || !S.unlocked) return;
     let m;
     try { m = JSON.parse(ev.data); } catch { return; }
     if (m.type === 'pushinfo') {
@@ -393,6 +609,11 @@ function connect() {
       return;
     }
     if (m.type === 'pong') { hbMisses = 0; return; }
+    if (m.type === 'prune' && Array.isArray(m.ids)) {
+      pruneChatToIds(m.ids);
+      mergeCachedMessages(S.roomId, [], m.ids, null);
+      return;
+    }
     if (m.type === 'presence') { S.online = m.online; setStatus(); }
     if (m.type === 'aisha-setting' && typeof m.enabled === 'boolean') {
       S.aishaEnabled = m.enabled;
@@ -422,28 +643,51 @@ function connect() {
       if (!m.aishaPersisted && savedAisha && savedOwner === S.mySubId) {
         try { ws.send(JSON.stringify({ type: 'aisha-setting', enabled: S.aishaEnabled })); } catch {}
       }
-      chat.innerHTML = '';
-      hideRemoteTyping();
-      stopAudio(); clearBlobs();
-      S.msgIndex.clear();
-      S.lastDayStart = null;
-      S.unread = 0; S.stick = true; paintJump();
-      for (const msg of m.messages) { if (S.msgIndex.has(msg.id)) continue; await renderMessage(msg, msg.from === S.mySubId ? 'me' : 'bot'); }
-      if (!m.messages.length) sys('Connected. Say hi — seen messages vanish after everyone leaves.');
+      if (!S.msgIndex.size) {
+        chat.innerHTML = '';
+        hideRemoteTyping();
+        stopAudio(); clearBlobs();
+        S.lastDayStart = null;
+        S.unread = 0; S.stick = true; paintJump();
+      }
+      const allIds = Array.isArray(m.allIds) ? m.allIds : m.messages.map(x => x.id);
+      const liveIds = new Set(allIds);
+      // Reconcile stale local ciphertext/UI with server's current ephemeral history.
+      for (const [id, rec] of S.msgIndex) {
+        if (liveIds.has(id) || pendingAck.has(id) || failedQueue.has(id)) continue;
+        const row = chat.querySelector(`.msg[data-id="${CSS.escape(id)}"]`);
+        if (row) row.remove();
+        if (rec.url) { URL.revokeObjectURL(rec.url); S.blobUrls.delete(rec.url); }
+        S.msgIndex.delete(id);
+      }
+      await renderHistoryMessages(m.messages);
+      reorderChatHistory();
+      const seenIds = Array.isArray(m.seenIds) ? m.seenIds : m.messages.filter(x => x.seen).map(x => x.id);
+      for (const id of seenIds) {
+        const rec = S.msgIndex.get(id);
+        if (rec && rec.mine && !rec.seen) {
+          rec.seen = true; rec.acked = true;
+          const row = chat.querySelector(`.msg[data-id="${CSS.escape(id)}"]`);
+          if (row) paintStatus(row, rec);
+        }
+      }
+      if (!allIds.length && !S.msgIndex.size) sys('Connected. Messages expire after one hour; seen messages may disappear sooner.');
       scrollDown();
-      sendSeen(m.messages.map(x => x.id)); // read receipt → server may wipe these later
+      sendSeen(allIds); // receipt updates server-side seen state, including cached messages
+      mergeCachedMessages(S.roomId, m.messages, allIds, seenIds);
       flushFailed();
     }
     if (m.type === 'msg' && m.message) {
       if (m.message.from === S.mySubId) return; // our own echo from another tab
       if (S.msgIndex.has(m.message.id)) return; // dup delivery → ignore
       await renderMessage(m.message, 'bot'); // sender's phone runs Aisha — receiver stays quiet (no doubles)
+      mergeCachedMessages(S.roomId, [m.message]);
       pop(); buzz();
       if (S.stick) scrollDown();
       else { S.unread++; paintJump(); }
       sendSeen([m.message.id]);
     }
-    if (m.type === 'edit' && m.message) applyEdit(m.message);
+    if (m.type === 'edit' && m.message) { applyEdit(m.message); mergeCachedMessages(S.roomId, [m.message]); }
     if (m.type === 'seen' && m.by !== S.mySubId && Array.isArray(m.ids)) {
       for (const id of m.ids) {
         const rec = S.msgIndex.get(id);
@@ -454,8 +698,10 @@ function connect() {
       }
     }
     if (m.type === 'acked' && typeof m.clientId === 'string') {
+      const queued = pendingAck.get(m.clientId);
       clearPending(m.clientId);
       const rec = S.msgIndex.get(m.clientId);
+      if (queued && rec) mergeCachedMessages(S.roomId, [{ id: m.clientId, from: S.mySubId, iv: queued.iv, ct: queued.ct, ts: rec.ts, kind: queued.kind || undefined, seen: !!rec.seen, pending: false }]);
       if (rec) { rec.failed = false; const rr = chat.querySelector(`.msg[data-id="${CSS.escape(m.clientId)}"]`); if (rr) rr.classList.remove('failed'); }
       if (!rec || !rec.mine || rec.acked) return;
       rec.acked = true;
@@ -470,14 +716,22 @@ function connect() {
     }
   };
   ws.onclose = () => {
-    if (!S.unlocked) return;
+    // Ignore closes from sockets replaced by quick rejoin / a newer retry.
+    if (ws !== S.ws || !S.unlocked) return;
+    clearTimeout(S.connectTimer); S.connectTimer = null;
+    clearTimeout(S.stableTimer); S.stableTimer = null;
+    S.ws = null;
     statusText.textContent = 'Reconnecting…';
     statusDot.className = 'dot retry';
-    S.reTries = (S.reTries || 0) + 1; // exponential backoff + jitter: calm on slow nets (2s→4s→8s…60s cap)
-    const wait = Math.min(60000, 2000 * Math.pow(2, S.reTries - 1)) + Math.floor(Math.random() * 1500);
-    setTimeout(() => S.unlocked && connect(), wait);
+    S.reTries = (S.reTries || 0) + 1; // exponential backoff + jitter, capped at 60s
+    const wait = Math.min(60000, 3000 * Math.pow(2, S.reTries - 1)) + Math.floor(Math.random() * 2000);
+    clearTimeout(S.reconnectTimer);
+    S.reconnectTimer = setTimeout(() => {
+      S.reconnectTimer = null;
+      if (S.unlocked && S.roomId && !S.ws) connect();
+    }, wait);
   };
-  ws.onerror = () => { try { ws.close(); } catch {} };
+  ws.onerror = () => { if (ws === S.ws) { try { ws.close(); } catch {} } };
 }
 
 function pokeIdle() {
@@ -490,7 +744,7 @@ function pokeIdle() {
 // Shake to panic-lock (Android needs no permission for this).
 let lastShake = 0, shakeCount = 0;
 addEventListener('devicemotion', e => {
-  if (!S.unlocked) return;
+  if (!S.unlocked || !S.shakeLockOn) return;
   const a = e.accelerationIncludingGravity;
   if (!a || a.x === null) return;
   if (Math.abs(a.x) + Math.abs(a.y) + Math.abs(a.z) > 42) {
@@ -511,8 +765,24 @@ async function unlock(secret) {
   chips.classList.add('hidden');
   $('attachBtn').classList.remove('hidden');
   input.dataset.ph = 'Message…';
+  stopAudio(); clearBlobs(); S.msgIndex.clear(); S.lastDayStart = null; S.cacheIds = [];
   chat.innerHTML = '';
   sys('Pro connected ✓  Code: ' + code + ' — swipe a message to reply, long-press for more');
+  // Paint locally cached ciphertext immediately, then sync only missing/edited IDs from server.
+  const cached = await loadCachedMessages(roomId).catch(() => []);
+  if (!S.unlocked || S.roomId !== roomId) return;
+  S.cacheIds = cached.map(m => m.id);
+  for (const m of cached) if (m.pending && m.iv && m.ct) failedQueue.set(m.id, { iv: m.iv, ct: m.ct, kind: m.kind || null, tries: 0 });
+  if (cached.length) {
+    const intro = chat.querySelector('.msg.sys');
+    if (intro && intro.textContent.startsWith('Pro connected')) intro.remove();
+    await renderHistoryMessages(cached);
+    for (const m of cached) if (m.pending) {
+      const row = chat.querySelector(`.msg[data-id="${CSS.escape(m.id)}"]`);
+      if (row) { row.classList.add('failed'); row.title = 'Not delivered — tap to retry'; }
+    }
+    scrollDown();
+  }
   setStatus(); connect(); pokeIdle();
   await ensurePush(); // needs roomId, so it happens here
   renderAlerts();
@@ -529,8 +799,13 @@ function lock(msg) {
   cancelEdit();
   hideRemoteTyping();
   S.unread = 0; S.stick = true; paintJump();
-  try { S.ws && S.ws.close(); } catch {}
-  S.ws = null;
+  clearTimeout(S.reconnectTimer); S.reconnectTimer = null;
+  clearTimeout(S.connectTimer); S.connectTimer = null;
+  clearTimeout(S.stableTimer); S.stableTimer = null;
+  clearInterval(S.hbTimer); S.hbTimer = null;
+  const closingWs = S.ws;
+  S.ws = null; // invalidate before close so lock/rejoin cannot trigger a stale retry
+  try { closingWs && closingWs.close(); } catch {}
   clearTimeout(S.idleTimer);
   chips.classList.remove('hidden');
   $('attachBtn').classList.add('hidden');
@@ -602,6 +877,8 @@ $('logo').addEventListener('click', () => {
   taps.push(now);
   if (taps.length >= 3) {
     taps = [];
+    $('developerView').classList.remove('hidden');
+    $('settingsPage').classList.add('hidden');
     $('sheetWrap').classList.remove('hidden');
     if (!S.unlocked) { $('apiKey').value = ''; $('sessInfo').classList.add('hidden'); }
     setTimeout(() => { $('apiKey').removeAttribute('readonly'); $('apiKey').focus(); }, 100);
@@ -752,6 +1029,7 @@ async function aishaSend(text) {
   S.ws.send(JSON.stringify({ type: 'msg', id, iv, ct, sender: 'Aisha' }));
   const rec = { text, mine: false, bot: 'Aisha', seen: true, acked: true, ts: Date.now() };
   S.msgIndex.set(id, rec);
+  mergeCachedMessages(S.roomId, [{ id, from: S.mySubId, iv, ct, ts: rec.ts, seen: true }]);
   maybeDayDivider(rec.ts);
   chatBubbleAisha(id, rec);
   aishaLast = Date.now(); aishaDay = new Date().toDateString(); aishaHours.push(Date.now());
@@ -759,7 +1037,13 @@ async function aishaSend(text) {
   pop();
   if (S.stick) scrollDown(); else { S.unread++; paintJump(); }
 }
-$('closeSheet').onclick = () => $('sheetWrap').classList.add('hidden');
+function showDeveloperView() {
+  $('settingsPage').classList.add('hidden');
+  $('developerView').classList.remove('hidden');
+}
+$('settingsNav').onclick = () => { $('developerView').classList.add('hidden'); $('settingsPage').classList.remove('hidden'); paintFam(); };
+$('settingsBack').onclick = showDeveloperView;
+$('closeSheet').onclick = () => { $('sheetWrap').classList.add('hidden'); showDeveloperView(); };
 let brainCache = null, brainCacheT = 0;
 async function refreshBrain() {
   try {
@@ -783,6 +1067,8 @@ function paintFam() {
   $('roleMom').classList.toggle('sel', c.role === 'mommy');
   $('aishaOn').classList.toggle('sel', c.enabled);
   $('aishaOff').classList.toggle('sel', !c.enabled);
+  $('shakeOn').classList.toggle('sel', S.shakeLockOn);
+  $('shakeOff').classList.toggle('sel', !S.shakeLockOn);
   $('chatQuiet').classList.toggle('sel', c.chat === 'quiet');
   $('chatNormal').classList.toggle('sel', c.chat === 'normal');
   $('chatNosy').classList.toggle('sel', c.chat === 'nosy');
@@ -802,6 +1088,8 @@ function setAishaEnabled(enabled) {
 }
 $('aishaOn').onclick = () => setAishaEnabled(true);
 $('aishaOff').onclick = () => setAishaEnabled(false);
+$('shakeOn').onclick = () => { S.shakeLockOn = true; lsSet('cb_shake_lock', 'on'); paintFam(); };
+$('shakeOff').onclick = () => { S.shakeLockOn = false; lsSet('cb_shake_lock', 'off'); paintFam(); };
 $('chatQuiet').onclick = () => { lsSet('aishaChat', 'quiet'); paintFam(); };
 $('chatNormal').onclick = () => { lsSet('aishaChat', 'normal'); paintFam(); };
 $('chatNosy').onclick = () => { lsSet('aishaChat', 'nosy'); paintFam(); toast('Nosy Aisha. Brave. 👀'); };
@@ -826,7 +1114,7 @@ $('aishaKeyTest').onclick = async () => {
 };
 try { if (lsGet('aishaKey')) lsDel('aishaKey'); } catch {} // keys live on the server now — wiped from phones
 try { paintFam(); } catch {}
-$('sheetWrap').addEventListener('click', e => { if (e.target.id === 'sheetWrap') $('sheetWrap').classList.add('hidden'); });
+$('sheetWrap').addEventListener('click', e => { if (e.target.id === 'sheetWrap') { $('sheetWrap').classList.add('hidden'); showDeveloperView(); } });
 $('connectBtn').onclick = async () => {
   const v = $('apiKey').value.trim();
   if (!v) return toast('Enter your API key');
@@ -873,7 +1161,7 @@ lockBtn.onclick = () => {
   let secret = null;
   try { secret = sessionStorage.getItem('cb_secret'); } catch {}
   if (secret) unlock(secret).then(() => toast('Welcome back')).catch(() => toast('Could not rejoin'));
-  else { $('sheetWrap').classList.remove('hidden'); setTimeout(() => { $('apiKey').removeAttribute('readonly'); $('apiKey').focus(); }, 100); } // fresh tab → normal unlock
+  else { showDeveloperView(); $('sheetWrap').classList.remove('hidden'); setTimeout(() => { $('apiKey').removeAttribute('readonly'); $('apiKey').focus(); }, 100); } // fresh tab → normal unlock
 };
 // Note: locking does NOT unsubscribe — notifications keep working while hidden.
 // Only the 🔔 toggle below (or browser settings) stops them.
@@ -1163,6 +1451,21 @@ function chatBubbleMedia(id, who, rec) {
       s.textContent = 'Photo unavailable';
       d.appendChild(s);
     }
+  } else if (rec.kind === 'video') {
+    if (rec.url) {
+      const v = document.createElement('video');
+      v.className = 'mediaVideo';
+      v.src = rec.url;
+      v.controls = true;
+      v.playsInline = true;
+      v.preload = 'metadata';
+      d.appendChild(v);
+    } else {
+      const s = document.createElement('span');
+      s.className = 'txt';
+      s.textContent = 'Video unavailable';
+      d.appendChild(s);
+    }
   } else {
     d.appendChild(buildPlayer(rec));
   }
@@ -1178,6 +1481,7 @@ function chatBubbleMedia(id, who, rec) {
     d.appendChild(el);
   }
   chat.appendChild(d);
+  return d;
 }
 function buildPlayer(rec) {
   const wrap = document.createElement('div');
@@ -1289,30 +1593,41 @@ async function fileToJpeg(file, maxDim = 1280, q = 0.82) {
 }
 async function sendMedia(kind, blob, meta = {}) {
   if (!S.unlocked) return;
-  if (!S.ws || S.ws.readyState !== 1) return toast('Reconnecting… try again in a sec');
-  if (blob.size > 2000000) return toast('File too large (2 MB max)');
+  const maxSize = kind === 'video' ? 12000000 : 2000000;
+  if (blob.size > maxSize) return toast(kind === 'video' ? 'Video too large (12 MB max)' : 'File too large (2 MB max)');
   try {
     const buf = await blob.arrayBuffer();
     const payload = { kind, mime: blob.type || meta.mime || 'application/octet-stream', data: b64eBytes(new Uint8Array(buf)) };
     if (meta.dur) payload.dur = meta.dur;
     if (S.replyTo) payload.replyTo = { id: S.replyTo.id, t: S.replyTo.t, mine: S.replyTo.mine };
     const { iv, ct } = await encryptPayload(payload);
-    if (ct.length > 2800000) return toast('File too large after encryption');
+    if (ct.length > 23000000) return toast('File too large after encryption');
     const id = (crypto.randomUUID ? crypto.randomUUID() : 'm' + Date.now().toString(36) + Math.random().toString(36).slice(2));
-    S.ws.send(JSON.stringify({ type: 'msg', id, iv, ct, kind, sender: senderLabel() }));
-    pendingAck.set(id, { iv, ct, kind, tries: 0, timer: setTimeout(() => ackTimeout(id), 8000) });
     const url = URL.createObjectURL(blob);
     S.blobUrls.add(url);
-    const rec = { text: kind === 'img' ? 'Photo' : 'Voice note', kind, mine: true,
+    const rec = { text: kind === 'img' ? 'Photo' : kind === 'video' ? 'Video' : 'Voice note', kind, mine: true,
       replyTo: payload.replyTo || null, seen: false, acked: false, ts: Date.now(), url, dur: meta.dur || 0 };
+    const queued = { iv, ct, kind, tries: 0 };
     S.msgIndex.set(id, rec);
+    mergeCachedMessages(S.roomId, [{ id, from: S.mySubId, iv, ct, ts: rec.ts, kind, seen: false, pending: true }]);
     maybeDayDivider(rec.ts);
-    chatBubbleMedia(id, 'me', rec);
+    const row = chatBubbleMedia(id, 'me', rec);
     cancelReply();
     clearTimeout(typingTimer); sendTyping(false);
     pokeIdle();
     S.stick = true; S.unread = 0; paintJump(); scrollDown();
     aishaReact(rec);
+    if (S.ws && S.ws.readyState === 1) {
+      pendingAck.set(id, { ...queued, timer: setTimeout(() => ackTimeout(id), 8000) });
+      try { S.ws.send(JSON.stringify({ type: 'msg', id, iv, ct, kind, sender: senderLabel() })); }
+      catch {
+        clearPending(id); failedQueue.set(id, queued); rec.failed = true; row.classList.add('failed');
+        toast('Queued — will retry when reconnected');
+      }
+    } else {
+      failedQueue.set(id, queued); rec.failed = true; row.classList.add('failed');
+      toast('Queued — will send when reconnected');
+    }
   } catch (e) { console.warn('media send failed', e); toast('Send failed (' + ((e && e.message) || '?') + ')'); }
 }
 async function sendPhotoFile(file) {
@@ -1324,6 +1639,25 @@ async function sendPhotoFile(file) {
     await sendMedia('img', await fileToJpeg(file));
   } catch (er) { toast('Could not read that photo (' + ((er && er.message) || '?') + ')'); }
 }
+async function sendVideoFile(file) {
+  if (!file) return;
+  const name = (file.name || '').toLowerCase();
+  const mime = file.type || ({ '.mp4': 'video/mp4', '.m4v': 'video/mp4', '.mov': 'video/quicktime', '.webm': 'video/webm', '.3gp': 'video/3gpp' }[name.match(/\.[^.]+$/)?.[0] || ''] || '');
+  if (!mime.startsWith('video/')) return toast('Unsupported video format');
+  const video = file.type ? file : new Blob([file], { type: mime });
+  await sendMedia('video', video, { mime });
+}
+async function sendSelectedFiles(fileList) {
+  const files = Array.from(fileList || []);
+  if (!files.length) return;
+  if (files.length > 1) toast(`Sending ${files.length} items…`);
+  for (const file of files) {
+    const name = (file.name || '').toLowerCase();
+    if ((file.type || '').startsWith('image/') || /\.(jpe?g|png|webp|gif|bmp|hei[cf])$/.test(name)) await sendPhotoFile(file);
+    else if ((file.type || '').startsWith('video/') || /\.(mp4|m4v|mov|webm|3gp)$/.test(name)) await sendVideoFile(file);
+    else toast('Skipped unsupported file: ' + (file.name || 'unknown'));
+  }
+}
 // ── attach sheet ──
 function openAttach() { if (S.unlocked) $('attachSheetWrap').classList.remove('hidden'); }
 function closeAttach() { $('attachSheetWrap').classList.add('hidden'); }
@@ -1333,7 +1667,7 @@ $('attachSheetWrap').addEventListener('click', e => { if (e.target.id === 'attac
 $('attachGallery').onclick = () => { closeAttach(); $('filePick').click(); };
 $('attachCamera').onclick = () => { closeAttach(); $('camPick').click(); };
 $('attachVoice').onclick = () => { closeAttach(); startVoice(); };
-$('filePick').onchange = e => { const f = e.target.files[0]; e.target.value = ''; if (f) sendPhotoFile(f); };
+$('filePick').onchange = e => { const files = e.target.files; sendSelectedFiles(files); e.target.value = ''; };
 $('camPick').onchange = e => { const f = e.target.files[0]; e.target.value = ''; if (f) sendPhotoFile(f); };
 // ── voice recorder ──
 let MR = null, MRchunks = [], MRtimer = null, MRstart = 0, MRstream = null, MRmime = '', MRdiscard = false;
@@ -1488,19 +1822,30 @@ form.addEventListener('submit', async e => {
     const payload = { t: text };
     if (S.replyTo) payload.replyTo = { id: S.replyTo.id, t: S.replyTo.t, mine: S.replyTo.mine };
     const { iv, ct } = await encryptPayload(payload);
+    const id = (crypto.randomUUID ? crypto.randomUUID() : 'm' + Date.now().toString(36) + Math.random().toString(36).slice(2));
+    const rec = { text, mine: true, replyTo: payload.replyTo || null, seen: false, acked: false, ts: Date.now() };
+    const queued = { iv, ct, kind: null, tries: 0 };
+    // Render and retain the message before attempting the socket send. A send
+    // can throw after the peer received the frame, so never let that erase it locally.
+    S.msgIndex.set(id, rec);
+    mergeCachedMessages(S.roomId, [{ id, from: S.mySubId, iv, ct, ts: rec.ts, seen: false, pending: true }]);
+    maybeDayDivider(rec.ts);
+    const row = chatBubble(id, 'me', text, payload.replyTo || null, false, rec);
+    cancelReply();
+    clearTimeout(typingTimer); sendTyping(false);
+    S.stick = true; S.unread = 0; paintJump(); scrollDown();
+    aishaReact(rec);
     if (S.ws && S.ws.readyState === 1) {
-      const id = (crypto.randomUUID ? crypto.randomUUID() : 'm' + Date.now().toString(36) + Math.random().toString(36).slice(2));
-      S.ws.send(JSON.stringify({ type: 'msg', id, iv, ct, sender: senderLabel() }));
-      pendingAck.set(id, { iv, ct, kind: null, tries: 0, timer: setTimeout(() => ackTimeout(id), 8000) });
-      const rec = { text, mine: true, replyTo: payload.replyTo || null, seen: false, acked: false, ts: Date.now() };
-      S.msgIndex.set(id, rec);
-      maybeDayDivider(rec.ts);
-      chatBubble(id, 'me', text, payload.replyTo || null, false, rec);
-      cancelReply();
-      clearTimeout(typingTimer); sendTyping(false);
-      S.stick = true; S.unread = 0; paintJump(); scrollDown();
-      aishaReact(rec);
-    } else { setComposer(text); toast('Reconnecting… try again in a sec'); }
+      pendingAck.set(id, { ...queued, timer: setTimeout(() => ackTimeout(id), 8000) });
+      try { S.ws.send(JSON.stringify({ type: 'msg', id, iv, ct, sender: senderLabel() })); }
+      catch {
+        clearPending(id); failedQueue.set(id, queued); rec.failed = true; row.classList.add('failed');
+        toast('Queued — will retry when reconnected');
+      }
+    } else {
+      failedQueue.set(id, queued); rec.failed = true; row.classList.add('failed');
+      toast('Queued — will send when reconnected');
+    }
   } catch { setComposer(text); toast('Send failed'); }
 });
 
