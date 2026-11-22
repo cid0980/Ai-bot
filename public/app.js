@@ -2056,7 +2056,7 @@ function applyTheme(t) {
   $('themeBtn').innerHTML = t === 'light' ? ICON.sun : ICON.moon;
 }
 function applyAccent(a) {
-  if (!['amber', 'forest', 'oxblood'].includes(a)) a = 'amber';
+  if (!['amber', 'forest', 'oxblood', 'ocean', 'plum'].includes(a)) a = 'amber';
   document.documentElement.dataset.accent = a;
   try { localStorage.setItem('cb_accent', a); } catch {}
   document.querySelectorAll('.swatch').forEach(s => s.classList.toggle('on', s.dataset.a === a));

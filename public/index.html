@@ -199,6 +199,10 @@
   [data-theme="light"][data-accent="forest"] { --accent-text: #2f7a44; }
   [data-accent="oxblood"] { --accent: #c96f6f; --accent-text: #c96f6f; --accent-ink: #230e0e; --bubble-me: #c96f6f; }
   [data-theme="light"][data-accent="oxblood"] { --accent-text: #93342f; }
+  [data-accent="ocean"] { --bg: #0d141b; --panel: #14202a; --bubble-bot: #1c2b35; --bubble-me: #63b9ca; --text: #eef4f7; --muted: #91a4ae; --line: rgba(220,239,247,.12); --chip: #1b2b36; --sysbg: rgba(220,239,247,.06); --accent: #63b9ca; --accent-text: #63b9ca; --accent-ink: #092026; }
+  [data-theme="light"][data-accent="ocean"] { --bg: #edf5f7; --panel: #f8fcfd; --bubble-bot: #dce9ed; --bubble-me: #63b9ca; --text: #14242c; --muted: #667f89; --line: rgba(20,46,58,.14); --chip: #e1eef1; --sysbg: rgba(20,46,58,.05); --accent: #63b9ca; --accent-text: #176c7d; --accent-ink: #092026; }
+  [data-accent="plum"] { --bg: #151119; --panel: #211a26; --bubble-bot: #2c2331; --bubble-me: #c78ab5; --text: #f5eff6; --muted: #b3a4b7; --line: rgba(245,230,248,.12); --chip: #302637; --sysbg: rgba(245,230,248,.06); --accent: #c78ab5; --accent-text: #c78ab5; --accent-ink: #281525; }
+  [data-theme="light"][data-accent="plum"] { --bg: #f5eff5; --panel: #fcf8fc; --bubble-bot: #e9dce9; --bubble-me: #c78ab5; --text: #2b1d2b; --muted: #806d80; --line: rgba(52,30,52,.13); --chip: #eee2ed; --sysbg: rgba(52,30,52,.05); --accent: #c78ab5; --accent-text: #7e476e; --accent-ink: #281525; }
   #accentRow { display: flex; align-items: center; gap: 10px; padding: 4px 2px 14px; font-size: 13px; color: var(--muted); }
   #accentRow .swatches { display: flex; gap: 10px; margin-left: auto; }
   .swatch { width: 28px; height: 28px; border-radius: 50%; background: var(--sw); border: 2px solid transparent; cursor: pointer; padding: 0; }
@@ -335,7 +339,7 @@
       <div class="settingsSection">
         <div class="famTitle">Appearance</div>
         <p class="settingNote">Choose an accent color for this device.</p>
-        <div id="accentRow"><span>Accent color</span><span class="swatches"><button class="swatch" data-a="amber" style="--sw:#e8a33d" aria-label="Amber"></button> <button class="swatch" data-a="forest" style="--sw:#7fbf8f" aria-label="Forest"></button> <button class="swatch" data-a="oxblood" style="--sw:#c96f6f" aria-label="Oxblood"></button></span></div>
+        <div id="accentRow"><span>Accent color</span><span class="swatches"><button class="swatch" data-a="amber" style="--sw:#e8a33d" aria-label="Amber"></button> <button class="swatch" data-a="forest" style="--sw:#7fbf8f" aria-label="Forest"></button> <button class="swatch" data-a="oxblood" style="--sw:#c96f6f" aria-label="Oxblood"></button> <button class="swatch" data-a="ocean" style="--sw:#63b9ca" aria-label="Coastal blue"></button> <button class="swatch" data-a="plum" style="--sw:#c78ab5" aria-label="Muted plum"></button></span></div>
       </div>
       <div id="famBox">
         <div class="famTitle">Chat behavior</div>
