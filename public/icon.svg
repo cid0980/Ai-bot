@@ -1,13 +1,7 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="115" fill="#e8a33d"/>
-  <g fill="none" stroke="#211806" stroke-width="26" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M256 118v-22"/>
-    <circle cx="256" cy="82" r="12" fill="#211806" stroke="none"/>
-    <rect x="116" y="160" width="280" height="236" rx="64"/>
-    <path d="M116 268h-34"/>
-    <path d="M396 268h34"/>
-    <path d="M206 248v34"/>
-    <path d="M306 248v34"/>
-    <path d="M216 322q40 30 80 0"/>
-  </g>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Chat Boy AI">
+  <rect width="128" height="128" rx="35" fill="#211a26"/>
+  <circle cx="64" cy="64" r="36" fill="#c78ab5"/>
+  <path d="M64 30c5 18 12 25 30 30-18 5-25 12-30 30-5-18-12-25-30-30 18-5 25-12 30-30Z" fill="#f7eaf4"/>
+  <path d="M95 22v14m-7-7h14M30 86v12m-6-6h12" fill="none" stroke="#c78ab5" stroke-width="4" stroke-linecap="round"/>
+  <circle cx="94" cy="94" r="5" fill="#f7eaf4"/>
 </svg>

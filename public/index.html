@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"/>
-<meta name="theme-color" content="#14110c"/>
+<meta name="theme-color" content="#151119"/>
 <title>Chat Boy AI</title>
 <link rel="manifest" href="/manifest.webmanifest"/>
 <link rel="icon" href="/icon.svg"/>
@@ -41,7 +41,7 @@
   }
   .logo {
     width: 38px; height: 38px; border-radius: 12px; font-size: 22px;
-    background: var(--accent);
+    background: transparent; overflow: hidden;
     display: flex; align-items: center; justify-content: center;
     user-select: none; cursor: pointer; flex-shrink: 0;
   }
@@ -178,7 +178,7 @@
   .seenMark.isFailed .statusState { color: #c93636; font-weight: 800; }
   [data-theme="dark"] .seenMark.isFailed .statusState { color: #ff8c8c; }
   .icon-btn svg { width: 20px; height: 20px; display: block; }
-  .logo svg { width: 26px; height: 26px; display: block; }
+  .logo svg { width: 38px; height: 38px; display: block; }
   .msg.bot, .msg.me { box-shadow: 0 1px 3px rgba(0,0,0,.28); }
   #replyBar svg, #editBar svg { width: 16px; height: 16px; flex-shrink: 0; color: var(--muted); }
   #editBar .tag { display: flex; align-items: center; gap: 5px; }
@@ -306,7 +306,7 @@
 <body>
 <div id="app">
   <header>
-    <div id="logo" class="logo" title="Chat Boy AI"><svg viewBox="0 0 24 24" fill="none" stroke="#211806" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg></div>
+    <div id="logo" class="logo" title="Chat Boy AI"><svg viewBox="0 0 128 128" aria-hidden="true"><rect width="128" height="128" rx="35" fill="#211a26"/><circle cx="64" cy="64" r="36" fill="#c78ab5"/><path d="M64 30c5 18 12 25 30 30-18 5-25 12-30 30-5-18-12-25-30-30 18-5 25-12 30-30Z" fill="#f7eaf4"/><path d="M95 22v14m-7-7h14M30 86v12m-6-6h12" fill="none" stroke="#c78ab5" stroke-width="4" stroke-linecap="round"/><circle cx="94" cy="94" r="5" fill="#f7eaf4"/></svg></div>
     <div class="title">
       <h1>Chat Boy AI</h1>
       <p id="status"><span class="dot"></span><span id="statusText">Always here to help</span></p>
