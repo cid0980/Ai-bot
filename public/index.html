@@ -55,7 +55,7 @@
   .icon-btn:hover { background: var(--chip); }
   .icon-btn:active { transform: scale(.92); }
   .hidden { display: none !important; }
-  main#chat { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 12px 10px; display: flex; flex-direction: column; gap: 6px; touch-action: pan-y; }
+  main#chat { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 12px 10px; display: flex; flex-direction: column; gap: 7px; touch-action: pan-y; scroll-behavior: smooth; scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
   main#chat > :first-child { margin-top: auto; } /* bottom-anchored like every chat app */
   .msg.me + .msg.me, .msg.bot + .msg.bot { margin-top: -3px; } /* same-side hug */
   .msg.failed { box-shadow: 0 0 0 1.5px #e5484d; }
@@ -113,6 +113,7 @@
   .sheetTop h2 { margin: 0; font-size: 18px; }
   .sheetTop .icon-btn { flex: 0 0 auto; border: 1px solid var(--line); background: var(--chip); }
   .settingsSection { border-top: 1px solid var(--line); margin-top: 12px; padding-top: 12px; }
+  .settingNote { color: var(--muted); font-size: 12px; line-height: 1.45; margin: -5px 0 10px; }
   @keyframes up { from { transform: translateY(40px); opacity: 0; } }
   #sheet h2 { margin: 0 0 4px; font-size: 18px; }
   #sheet .muted { color: var(--muted); font-size: 13px; margin: 0 0 14px; }
@@ -150,8 +151,12 @@
   .msgBtn { display: flex; align-items: center; gap: 12px; width: 100%; background: none; border: 0; color: var(--text); font-size: 16px; padding: 14px 10px; border-radius: 12px; cursor: pointer; text-align: left; }
   .msgBtn:active { background: var(--chip); }
   #swipeHint { position: absolute; z-index: 6; font-size: 22px; opacity: 0; pointer-events: none; transition: opacity .1s; }
-  .seenMark { display: block; font-size: 10px; opacity: .6; margin-top: 1px; text-align: right; }
-  .seenMark.isSeen { opacity: 1; font-weight: 800; }
+  .seenMark { display: block; font-size: 10px; line-height: 1.25; opacity: .7; margin-top: 3px; text-align: right; white-space: normal; }
+  .seenMark.isSeen { opacity: 1; font-weight: 800; color: #278447; }
+  [data-theme="dark"] .seenMark.isSeen { color: #95d6a2; }
+  .seenMark.isSending { color: var(--muted); }
+  .seenMark.isFailed { color: #c93636; font-weight: 800; cursor: pointer; }
+  [data-theme="dark"] .seenMark.isFailed { color: #ff8c8c; }
   .icon-btn svg { width: 20px; height: 20px; display: block; }
   .logo svg { width: 26px; height: 26px; display: block; }
   .msg.bot, .msg.me { box-shadow: 0 1px 3px rgba(0,0,0,.28); }
@@ -180,7 +185,7 @@
   .icon-btn.warn { color: #e5484d; }
   .msg { user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
   .timeMark { display: block; font-size: 10px; opacity: .55; margin-top: 1px; }
-  .dayDiv { align-self: center; font-size: 10.5px; font-weight: 700; color: var(--muted); background: var(--sysbg); border-radius: 999px; padding: 3px 12px; margin: 4px 0; }
+  .dayDiv { position: sticky; top: 4px; z-index: 2; align-self: center; font-size: 10.5px; font-weight: 700; letter-spacing: .15px; color: var(--muted); background: color-mix(in srgb, var(--panel) 88%, transparent); border: 1px solid var(--line); backdrop-filter: blur(10px); border-radius: 999px; padding: 4px 13px; margin: 10px 0 6px; }
   .dot.retry { background: var(--accent); animation: blinkdot 1s infinite; }
   @keyframes blinkdot { 50% { opacity: .3; } }
   .quote.tappable { cursor: pointer; }
@@ -199,6 +204,26 @@
   #attachBtn svg { width: 20px; height: 20px; display: block; }
   #attachSheetWrap { position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 25; display: flex; align-items: flex-end; justify-content: center; }
   #attachSheet { width: 100%; max-width: 560px; background: var(--panel); border-radius: 24px 24px 0 0; padding: 12px 16px calc(20px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); animation: up .25s ease-out; }
+  #transferNotice { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 5px 10px; align-items: center; padding: 8px 14px; background: var(--panel); border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; }
+  #transferText { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #transferProgress { grid-column: 1; width: 100%; height: 4px; accent-color: var(--accent); }
+  #transferDismiss { grid-column: 2; grid-row: 1 / span 2; width: 32px; height: 32px; border: 0; border-radius: 50%; background: transparent; color: var(--muted); display: grid; place-items: center; cursor: pointer; }
+  #transferDismiss svg { width: 16px; height: 16px; }
+  #mediaPreviewWrap { position: fixed; inset: 0; background: rgba(0,0,0,.64); z-index: 27; display: flex; align-items: flex-end; justify-content: center; }
+  #mediaPreviewSheet { width: 100%; max-width: 560px; max-height: 88dvh; overflow-y: auto; background: var(--panel); border-radius: 24px 24px 0 0; padding: 16px 16px calc(18px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); animation: up .25s ease-out; }
+  .previewTop, .previewActions { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .previewTop h2 { margin: 0; font-size: 17px; }
+  .previewSub { color: var(--muted); font-size: 12px; margin: 4px 0 12px; }
+  #mediaPreviewList { display: grid; grid-template-columns: repeat(auto-fill,minmax(118px,1fr)); gap: 10px; margin-bottom: 14px; }
+  .previewCard { position: relative; overflow: hidden; background: var(--bg); border: 1px solid var(--line); border-radius: 14px; min-width: 0; }
+  .previewThumb { width: 100%; aspect-ratio: 1; display: block; object-fit: cover; background: #080808; }
+  .previewMeta { padding: 7px 8px 9px; font-size: 11px; }
+  .previewName { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+  .previewSize { color: var(--muted); margin-top: 2px; }
+  .previewRemove { position: absolute; top: 6px; right: 6px; width: 28px; height: 28px; border: 0; border-radius: 50%; background: rgba(0,0,0,.72); color: white; display: grid; place-items: center; cursor: pointer; }
+  .previewRemove svg { width: 15px; height: 15px; }
+  .previewActions .btn { margin: 0; flex: 1; }
+  .previewActions .btn.secondary { background: var(--chip); color: var(--text); }
   .msg.media { padding: 4px; }
   .mediaImg { display: block; max-width: 100%; max-height: 320px; border-radius: 12px; cursor: pointer; }
   .mediaVideo { display: block; width: min(100%, 420px); max-height: 320px; border-radius: 12px; background: #000; }
@@ -249,6 +274,13 @@
 
   <div id="alertBar" class="hidden"></div>
   <main id="chat"></main>
+  <div id="transferNotice" class="hidden" role="status" aria-live="polite">
+    <span id="transferText">Preparing media…</span>
+    <progress id="transferProgress" max="100" value="0"></progress>
+    <button id="transferDismiss" type="button" aria-label="Hide transfer status" title="Hide">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+    </button>
+  </div>
 
   <div id="chips">
     <button data-q="What can you do?">What can you do?</button>
@@ -296,9 +328,14 @@
         </button>
         <h2>Settings</h2><span style="width:36px"></span>
       </div>
-      <div id="accentRow"><span>Accent</span><span class="swatches"><button class="swatch" data-a="amber" style="--sw:#e8a33d" aria-label="Amber"></button> <button class="swatch" data-a="forest" style="--sw:#7fbf8f" aria-label="Forest"></button> <button class="swatch" data-a="oxblood" style="--sw:#c96f6f" aria-label="Oxblood"></button></span></div>
+      <div class="settingsSection">
+        <div class="famTitle">Appearance</div>
+        <p class="settingNote">Choose an accent color for this device.</p>
+        <div id="accentRow"><span>Accent color</span><span class="swatches"><button class="swatch" data-a="amber" style="--sw:#e8a33d" aria-label="Amber"></button> <button class="swatch" data-a="forest" style="--sw:#7fbf8f" aria-label="Forest"></button> <button class="swatch" data-a="oxblood" style="--sw:#c96f6f" aria-label="Oxblood"></button></span></div>
+      </div>
       <div id="famBox">
-        <div class="famTitle">Family</div>
+        <div class="famTitle">Chat behavior</div>
+        <p class="settingNote">Personal controls apply to this phone; Aisha replies are shared across the room.</p>
         <div class="famRow"><span>This phone is</span><span class="famBtns"><button id="roleDad" type="button">Daddy</button><button id="roleMom" type="button">Mommy</button></span></div>
         <div class="famRow"><span>Aisha replies (both phones)</span><span class="famBtns"><button id="aishaOn" type="button">On</button><button id="aishaOff" type="button">Off</button></span></div>
         <div class="famRow"><span>Aisha is</span><span class="famBtns"><button id="chatQuiet" type="button">Quiet</button><button id="chatNormal" type="button">Normal</button><button id="chatNosy" type="button">Nosy</button></span></div>
@@ -306,13 +343,14 @@
         <div class="famRow"><span>AI status</span><span class="famKey"><span id="aishaBrain">Checking…</span><button id="aishaKeyTest" type="button">Test</button></span></div>
       </div>
       <div class="settingsSection">
-        <div class="famTitle">Notification backups</div>
+        <div class="famTitle">Notifications</div>
+        <p class="settingNote">Optional backup alerts if web push is unavailable.</p>
         <div class="famRow"><span>Telegram</span><span class="famKey"><input id="tgId" inputmode="numeric" placeholder="chat id (optional)" autocomplete="off"/><button id="tgSave" type="button">Save</button></span></div>
         <div class="famRow"><span>ntfy</span><span class="famKey"><input id="ntf" placeholder="topic (optional)" autocomplete="off" autocapitalize="off" spellcheck="false"/><button id="ntfSave" type="button">Save</button></span></div>
         <div class="famRow"><span>WhatsApp</span><span class="famKey"><input id="waPhone" inputmode="tel" placeholder="phone 91…" autocomplete="off"/><input id="waKey" inputmode="numeric" placeholder="apikey" autocomplete="off"/><button id="waSave" type="button">Save</button></span></div>
         <div class="famRow"><span>Email</span><span class="famKey"><input id="emAddr" type="email" placeholder="you@gmail.com" autocomplete="off" autocapitalize="off" spellcheck="false"/><button id="emSave" type="button">Save</button></span></div>
       </div>
-      <div class="settingsSection"><button id="testPushBtn" class="btn ghost">Send test notification</button></div>
+      <div class="settingsSection"><div class="famTitle">Notification tools</div><p class="settingNote">Verify that this room can reach your devices.</p><button id="testPushBtn" class="btn ghost">Send test notification</button></div>
     </section>
     <button id="closeSheet" class="btn ghost">Close</button>
   </div>
@@ -334,6 +372,20 @@
     <button class="msgBtn" id="attachCamera"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg> <span>Take a photo</span></button>
     <button class="msgBtn" id="attachVoice"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0"/><path d="M12 19v3"/></svg> <span>Voice note</span></button>
     <button class="msgBtn" id="attachClose"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg> <span>Cancel</span></button>
+  </div>
+</div>
+
+<div id="mediaPreviewWrap" class="hidden">
+  <div id="mediaPreviewSheet">
+    <div class="previewTop"><h2>Review attachments</h2><button id="previewClose" class="icon-btn" type="button" aria-label="Cancel selection" title="Cancel">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+    </button></div>
+    <p id="previewSub" class="previewSub">Check your photos and videos before sending.</p>
+    <div id="mediaPreviewList"></div>
+    <div class="previewActions">
+      <button id="previewAdd" class="btn secondary" type="button">Add more</button>
+      <button id="previewSend" class="btn" type="button">Send items</button>
+    </div>
   </div>
 </div>
 

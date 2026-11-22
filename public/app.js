@@ -105,12 +105,17 @@ function maybeDayDivider(ts) {
   chat.appendChild(el);
 }
 function tickText(rec) {
-  const s = rec.seen ? '\u2713\u2713' : rec.acked ? '\u2713\u2713' : '\u2713';
-  return rec.ts ? fmtTime(rec.ts) + ' \u00b7 ' + s : s;
+  const state = rec.failed ? 'Not sent · Tap to retry' : rec.seen ? 'Seen ✓✓' : rec.acked ? 'Sent ✓' : 'Sending…';
+  return rec.ts ? fmtTime(rec.ts) + ' · ' + state : state;
 }
 function paintStatus(row, rec) {
   const el = row.querySelector('.seenMark');
-  if (el) { el.textContent = tickText(rec); el.classList.toggle('isSeen', !!rec.seen); }
+  if (el) {
+    el.textContent = tickText(rec);
+    el.classList.toggle('isSeen', !!rec.seen);
+    el.classList.toggle('isFailed', !!rec.failed);
+    el.classList.toggle('isSending', !rec.acked && !rec.failed);
+  }
 }
 function setBadge(n) {
   try {
@@ -535,7 +540,7 @@ function ackTimeout(id) {
   }
   rec.failed = true;
   const row = chat.querySelector(`.msg[data-id="${CSS.escape(id)}"]`);
-  if (row) { row.classList.add('failed'); row.title = 'Not delivered — tap to retry'; }
+  if (row) { row.classList.add('failed'); row.title = 'Not delivered — tap to retry'; paintStatus(row, rec); }
   if (Date.now() - (S.lastFailToast || 0) > 10000) { S.lastFailToast = Date.now(); toast('Not delivered — will retry on reconnect'); }
 }
 function flushFailed() {
@@ -545,14 +550,16 @@ function flushFailed() {
     failedQueue.delete(id);
     p.tries++;
     try { S.ws.send(JSON.stringify({ type: 'msg', id, iv: p.iv, ct: p.ct, sender: senderLabel(), ...(p.kind ? { kind: p.kind } : {}) })); } catch { failedQueue.set(id, p); continue; }
+    const rec = S.msgIndex.get(id);
+    if (rec) rec.failed = false;
     const row = chat.querySelector(`.msg[data-id="${CSS.escape(id)}"]`);
-    if (row) { row.classList.remove('failed'); row.title = ''; }
+    if (row) { row.classList.remove('failed'); row.title = ''; if (rec) paintStatus(row, rec); }
     pendingAck.set(id, { iv: p.iv, ct: p.ct, kind: p.kind, tries: p.tries, timer: setTimeout(() => ackTimeout(id), 8000) });
   }
 }
 chat.addEventListener('click', e => {
   const row = e.target.closest('.msg.failed[data-id]');
-  if (!row || e.target.closest('button, video, audio')) return;
+  if (!row || e.target.closest('button, video, audio, img, a')) return;
   const item = failedQueue.get(row.dataset.id);
   if (!item) return;
   item.tries = 0;
@@ -702,7 +709,7 @@ function connect() {
       clearPending(m.clientId);
       const rec = S.msgIndex.get(m.clientId);
       if (queued && rec) mergeCachedMessages(S.roomId, [{ id: m.clientId, from: S.mySubId, iv: queued.iv, ct: queued.ct, ts: rec.ts, kind: queued.kind || undefined, seen: !!rec.seen, pending: false }]);
-      if (rec) { rec.failed = false; const rr = chat.querySelector(`.msg[data-id="${CSS.escape(m.clientId)}"]`); if (rr) rr.classList.remove('failed'); }
+      if (rec) { rec.failed = false; const rr = chat.querySelector(`.msg[data-id="${CSS.escape(m.clientId)}"]`); if (rr) { rr.classList.remove('failed'); rr.title = ''; paintStatus(rr, rec); } }
       if (!rec || !rec.mine || rec.acked) return;
       rec.acked = true;
       const row = chat.querySelector(`.msg[data-id="${CSS.escape(m.clientId)}"]`);
@@ -1592,16 +1599,19 @@ async function fileToJpeg(file, maxDim = 1280, q = 0.82) {
   });
 }
 async function sendMedia(kind, blob, meta = {}) {
-  if (!S.unlocked) return;
+  if (!S.unlocked) return false;
+  const progress = meta.onProgress || (() => {});
   const maxSize = kind === 'video' ? 12000000 : 2000000;
-  if (blob.size > maxSize) return toast(kind === 'video' ? 'Video too large (12 MB max)' : 'File too large (2 MB max)');
+  if (blob.size > maxSize) { progress('File too large'); toast(kind === 'video' ? 'Video too large (12 MB max)' : 'File too large (2 MB max)'); return false; }
   try {
+    progress('Reading');
     const buf = await blob.arrayBuffer();
     const payload = { kind, mime: blob.type || meta.mime || 'application/octet-stream', data: b64eBytes(new Uint8Array(buf)) };
     if (meta.dur) payload.dur = meta.dur;
     if (S.replyTo) payload.replyTo = { id: S.replyTo.id, t: S.replyTo.t, mine: S.replyTo.mine };
+    progress('Encrypting');
     const { iv, ct } = await encryptPayload(payload);
-    if (ct.length > 23000000) return toast('File too large after encryption');
+    if (ct.length > 23000000) { progress('Too large'); toast('File too large after encryption'); return false; }
     const id = (crypto.randomUUID ? crypto.randomUUID() : 'm' + Date.now().toString(36) + Math.random().toString(36).slice(2));
     const url = URL.createObjectURL(blob);
     S.blobUrls.add(url);
@@ -1618,45 +1628,109 @@ async function sendMedia(kind, blob, meta = {}) {
     S.stick = true; S.unread = 0; paintJump(); scrollDown();
     aishaReact(rec);
     if (S.ws && S.ws.readyState === 1) {
+      progress('Sending');
       pendingAck.set(id, { ...queued, timer: setTimeout(() => ackTimeout(id), 8000) });
-      try { S.ws.send(JSON.stringify({ type: 'msg', id, iv, ct, kind, sender: senderLabel() })); }
+      try { S.ws.send(JSON.stringify({ type: 'msg', id, iv, ct, kind, sender: senderLabel() })); progress('Added to chat'); }
       catch {
-        clearPending(id); failedQueue.set(id, queued); rec.failed = true; row.classList.add('failed');
-        toast('Queued — will retry when reconnected');
+        clearPending(id); failedQueue.set(id, queued); rec.failed = true; row.classList.add('failed'); paintStatus(row, rec);
+        progress('Queued for retry'); toast('Queued — will retry when reconnected');
       }
     } else {
-      failedQueue.set(id, queued); rec.failed = true; row.classList.add('failed');
-      toast('Queued — will send when reconnected');
+      failedQueue.set(id, queued); rec.failed = true; row.classList.add('failed'); paintStatus(row, rec);
+      progress('Queued until reconnected'); toast('Queued — will send when reconnected');
     }
-  } catch (e) { console.warn('media send failed', e); toast('Send failed (' + ((e && e.message) || '?') + ')'); }
+    return true;
+  } catch (e) { console.warn('media send failed', e); progress('Failed'); toast('Send failed (' + ((e && e.message) || '?') + ')'); return false; }
 }
-async function sendPhotoFile(file) {
-  if (!file) return;
+let selectedMedia = [];
+let transferHideTimer = null;
+function showTransfer(text, percent) {
+  $('transferNotice').classList.remove('hidden');
+  $('transferText').textContent = text;
+  $('transferProgress').value = Math.max(0, Math.min(100, percent));
+  clearTimeout(transferHideTimer);
+}
+function finishTransfer(text) {
+  showTransfer(text, 100);
+  transferHideTimer = setTimeout(() => $('transferNotice').classList.add('hidden'), 3500);
+}
+$('transferDismiss').onclick = () => $('transferNotice').classList.add('hidden');
+function formatFileSize(n) { return n < 1_000_000 ? Math.max(1, Math.round(n / 1000)) + ' KB' : (n / 1_000_000).toFixed(1) + ' MB'; }
+function mediaType(file) {
+  const name = (file.name || '').toLowerCase();
+  if ((file.type || '').startsWith('image/') || /\.(jpe?g|png|webp|gif|bmp|hei[cf])$/.test(name)) return 'image';
+  if ((file.type || '').startsWith('video/') || /\.(mp4|m4v|mov|webm|3gp)$/.test(name)) return 'video';
+  return '';
+}
+function renderMediaPreview() {
+  const list = $('mediaPreviewList');
+  list.replaceChildren();
+  $('previewSub').textContent = `${selectedMedia.length} item${selectedMedia.length === 1 ? '' : 's'} selected. Videos up to 12 MB; photos are compressed before sending.`;
+  $('previewSend').textContent = `Send ${selectedMedia.length} item${selectedMedia.length === 1 ? '' : 's'}`;
+  $('previewSend').disabled = !selectedMedia.length;
+  selectedMedia.forEach((item, index) => {
+    const card = document.createElement('div');
+    card.className = 'previewCard';
+    const media = document.createElement(item.type === 'video' ? 'video' : 'img');
+    media.className = 'previewThumb';
+    media.src = item.url;
+    if (item.type === 'video') { media.muted = true; media.playsInline = true; media.controls = true; }
+    else media.alt = item.file.name || 'Selected photo';
+    const meta = document.createElement('div'); meta.className = 'previewMeta';
+    const name = document.createElement('div'); name.className = 'previewName'; name.textContent = item.file.name || (item.type === 'video' ? 'Video' : 'Photo');
+    const size = document.createElement('div'); size.className = 'previewSize'; size.textContent = formatFileSize(item.file.size);
+    meta.append(name, size);
+    const remove = document.createElement('button'); remove.className = 'previewRemove'; remove.type = 'button'; remove.title = 'Remove'; remove.setAttribute('aria-label', 'Remove ' + (item.file.name || 'attachment'));
+    remove.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>';
+    remove.onclick = () => { URL.revokeObjectURL(item.url); selectedMedia.splice(index, 1); renderMediaPreview(); };
+    card.append(media, meta, remove); list.appendChild(card);
+  });
+}
+function addMediaToPreview(files) {
+  if (!S.unlocked) return;
+  for (const file of Array.from(files || [])) {
+    const type = mediaType(file);
+    if (!type) { toast('Skipped unsupported file: ' + (file.name || 'unknown')); continue; }
+    selectedMedia.push({ file, type, url: URL.createObjectURL(file) });
+  }
+  if (selectedMedia.length) { renderMediaPreview(); $('mediaPreviewWrap').classList.remove('hidden'); }
+}
+function closeMediaPreview(clear = true) {
+  $('mediaPreviewWrap').classList.add('hidden');
+  if (clear) { selectedMedia.forEach(x => URL.revokeObjectURL(x.url)); selectedMedia = []; }
+}
+async function sendPhotoFile(file, onProgress = () => {}) {
+  if (!file) return false;
   const fn = (file.name || '').toLowerCase(), ft = file.type || '';
-  if (ft === 'image/heic' || ft === 'image/heif' || /\.hei[cf]$/.test(fn)) return toast('HEIC photo — set camera to JPEG to send');
-  if (ft && !ft.startsWith('image/') && !/\.(jpe?g|png|webp|gif|bmp)$/.test(fn)) return toast('Not an image');
+  if (ft === 'image/heic' || ft === 'image/heif' || /\.hei[cf]$/.test(fn)) { toast('HEIC photo — set camera to JPEG to send'); return false; }
+  if (ft && !ft.startsWith('image/') && !/\.(jpe?g|png|webp|gif|bmp)$/.test(fn)) { toast('Not an image'); return false; }
   try {
-    await sendMedia('img', await fileToJpeg(file));
-  } catch (er) { toast('Could not read that photo (' + ((er && er.message) || '?') + ')'); }
+    onProgress('Compressing');
+    const jpeg = await fileToJpeg(file);
+    return await sendMedia('img', jpeg, { onProgress });
+  } catch (er) { toast('Could not read that photo (' + ((er && er.message) || '?') + ')'); return false; }
 }
-async function sendVideoFile(file) {
-  if (!file) return;
+async function sendVideoFile(file, onProgress = () => {}) {
+  if (!file) return false;
   const name = (file.name || '').toLowerCase();
   const mime = file.type || ({ '.mp4': 'video/mp4', '.m4v': 'video/mp4', '.mov': 'video/quicktime', '.webm': 'video/webm', '.3gp': 'video/3gpp' }[name.match(/\.[^.]+$/)?.[0] || ''] || '');
-  if (!mime.startsWith('video/')) return toast('Unsupported video format');
+  if (!mime.startsWith('video/')) { toast('Unsupported video format'); return false; }
   const video = file.type ? file : new Blob([file], { type: mime });
-  await sendMedia('video', video, { mime });
+  return sendMedia('video', video, { mime, onProgress });
 }
-async function sendSelectedFiles(fileList) {
-  const files = Array.from(fileList || []);
-  if (!files.length) return;
-  if (files.length > 1) toast(`Sending ${files.length} items…`);
-  for (const file of files) {
-    const name = (file.name || '').toLowerCase();
-    if ((file.type || '').startsWith('image/') || /\.(jpe?g|png|webp|gif|bmp|hei[cf])$/.test(name)) await sendPhotoFile(file);
-    else if ((file.type || '').startsWith('video/') || /\.(mp4|m4v|mov|webm|3gp)$/.test(name)) await sendVideoFile(file);
-    else toast('Skipped unsupported file: ' + (file.name || 'unknown'));
+async function processSelectedMedia(files) {
+  const batch = Array.from(files || []);
+  if (!batch.length) return;
+  let added = 0;
+  for (let i = 0; i < batch.length; i++) {
+    const file = batch[i], type = mediaType(file), name = file.name || (type === 'video' ? 'Video' : 'Photo');
+    const progress = stage => showTransfer(`${stage} · ${i + 1} of ${batch.length} · ${name}`, Math.round(i / batch.length * 100));
+    progress(type === 'video' ? 'Preparing video' : 'Preparing photo');
+    const ok = type === 'video' ? await sendVideoFile(file, progress) : await sendPhotoFile(file, progress);
+    if (ok) added++;
+    showTransfer(`Prepared ${i + 1} of ${batch.length} · ${name}`, Math.round((i + 1) / batch.length * 100));
   }
+  finishTransfer(`${added} of ${batch.length} item${batch.length === 1 ? '' : 's'} added. Delivery status is shown on each message.`);
 }
 // ── attach sheet ──
 function openAttach() { if (S.unlocked) $('attachSheetWrap').classList.remove('hidden'); }
@@ -1667,8 +1741,17 @@ $('attachSheetWrap').addEventListener('click', e => { if (e.target.id === 'attac
 $('attachGallery').onclick = () => { closeAttach(); $('filePick').click(); };
 $('attachCamera').onclick = () => { closeAttach(); $('camPick').click(); };
 $('attachVoice').onclick = () => { closeAttach(); startVoice(); };
-$('filePick').onchange = e => { const files = e.target.files; sendSelectedFiles(files); e.target.value = ''; };
-$('camPick').onchange = e => { const f = e.target.files[0]; e.target.value = ''; if (f) sendPhotoFile(f); };
+$('filePick').onchange = e => { const files = Array.from(e.target.files || []); e.target.value = ''; if (files.length) addMediaToPreview(files); };
+$('camPick').onchange = e => { const f = e.target.files[0]; e.target.value = ''; if (f) addMediaToPreview([f]); };
+$('previewAdd').onclick = () => $('filePick').click();
+$('previewClose').onclick = () => closeMediaPreview();
+$('mediaPreviewWrap').addEventListener('click', e => { if (e.target.id === 'mediaPreviewWrap') closeMediaPreview(); });
+$('previewSend').onclick = () => {
+  if (!selectedMedia.length) return;
+  const files = selectedMedia.map(x => x.file);
+  closeMediaPreview();
+  processSelectedMedia(files);
+};
 // ── voice recorder ──
 let MR = null, MRchunks = [], MRtimer = null, MRstart = 0, MRstream = null, MRmime = '', MRdiscard = false;
 let MRAC = null, MRlevelTimer = null;
@@ -1839,11 +1922,11 @@ form.addEventListener('submit', async e => {
       pendingAck.set(id, { ...queued, timer: setTimeout(() => ackTimeout(id), 8000) });
       try { S.ws.send(JSON.stringify({ type: 'msg', id, iv, ct, sender: senderLabel() })); }
       catch {
-        clearPending(id); failedQueue.set(id, queued); rec.failed = true; row.classList.add('failed');
+        clearPending(id); failedQueue.set(id, queued); rec.failed = true; row.classList.add('failed'); paintStatus(row, rec);
         toast('Queued — will retry when reconnected');
       }
     } else {
-      failedQueue.set(id, queued); rec.failed = true; row.classList.add('failed');
+      failedQueue.set(id, queued); rec.failed = true; row.classList.add('failed'); paintStatus(row, rec);
       toast('Queued — will send when reconnected');
     }
   } catch { setComposer(text); toast('Send failed'); }
