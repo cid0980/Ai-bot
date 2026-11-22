@@ -114,6 +114,23 @@
   .sheetTop .icon-btn { flex: 0 0 auto; border: 1px solid var(--line); background: var(--chip); }
   .settingsSection { border-top: 1px solid var(--line); margin-top: 12px; padding-top: 12px; }
   .settingNote { color: var(--muted); font-size: 12px; line-height: 1.45; margin: -5px 0 10px; }
+  /* Compact settings treatment: low-framing groups, clear dividers, mobile-safe fields. */
+  .settingsCompact .settingsSection, .settingsCompact #famBox { border: 0; margin: 0 0 17px; padding: 0; }
+  .settingsCompact .famTitle { margin: 0 2px 5px; color: var(--accent-text); font-size: 10px; font-weight: 800; letter-spacing: 1px; text-transform: uppercase; }
+  .settingsCompact .settingNote { margin: 0 2px 8px; font-size: 10.5px; }
+  .settingsCompact #accentRow { min-height: 46px; padding: 8px 2px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+  .settingsCompact #accentRow > span:first-child { font-size: 12px; color: var(--text); }
+  .settingsCompact #accentRow .swatches { gap: 8px; }
+  .settingsCompact .swatch { width: 23px; height: 23px; }
+  .settingsCompact #famBox .famRow { min-height: 48px; margin: 0; padding: 8px 2px; border-top: 1px solid var(--line); color: var(--text); font-size: 12px; }
+  .settingsCompact .famBtns { gap: 4px; }
+  .settingsCompact .famBtns button { padding: 6px 9px; font-size: 10px; }
+  .settingsCompact .famKey button { padding: 0 10px; font-size: 11px; }
+  .settingsCompact #notificationSettings .famRow { display: block; margin: 0; padding: 9px 2px; border-top: 1px solid var(--line); color: var(--text); font-size: 12px; }
+  .settingsCompact #notificationSettings .famKey { width: 100%; max-width: none; margin-top: 6px; }
+  .settingsCompact #notificationSettings .famKey input { width: auto; min-width: 0; flex: 1; height: 36px; padding: 7px 9px; font-size: 11px; }
+  .settingsCompact #notificationSettings .famKey button { min-height: 36px; }
+  .settingsCompact #testPushBtn { margin: 2px 0 0; padding: 10px; font-size: 12px; }
   @keyframes up { from { transform: translateY(40px); opacity: 0; } }
   #sheet h2 { margin: 0 0 4px; font-size: 18px; }
   #sheet .muted { color: var(--muted); font-size: 13px; margin: 0 0 14px; }
@@ -351,7 +368,7 @@
         <div class="muted" style="margin:6px 0 0">Both sides must show the same code.<br/>Chat history expires after one hour.</div>
       </div>
     </section>
-    <section id="settingsPage" class="hidden">
+    <section id="settingsPage" class="hidden settingsCompact">
       <div class="sheetTop">
         <button id="settingsBack" class="icon-btn" type="button" title="Back" aria-label="Back to developer settings">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/><path d="M9 12h12"/></svg>
@@ -372,7 +389,7 @@
         <div class="famRow"><span>Shake to lock (this phone)</span><span class="famBtns"><button id="shakeOn" type="button">On</button><button id="shakeOff" type="button">Off</button></span></div>
         <div class="famRow"><span>AI status</span><span class="famKey"><span id="aishaBrain">Checking…</span><button id="aishaKeyTest" type="button">Test</button></span></div>
       </div>
-      <div class="settingsSection">
+      <div class="settingsSection" id="notificationSettings">
         <div class="famTitle">Notifications</div>
         <p class="settingNote">Optional backup alerts if web push is unavailable.</p>
         <div class="famRow"><span>Telegram</span><span class="famKey"><input id="tgId" inputmode="numeric" placeholder="chat id (optional)" autocomplete="off"/><button id="tgSave" type="button">Save</button></span></div>
