@@ -17,7 +17,7 @@ import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DATA = path.join(__dirname, 'data');
+const DATA = process.env.DATA_DIR || path.join(__dirname, 'data');
 fs.mkdirSync(DATA, { recursive: true });
 
 // ── VAPID keys for Web Push.
@@ -137,6 +137,19 @@ const server = app.listen(PORT, '0.0.0.0', () =>
 // ── Realtime relay. RAM only — a restart wipes every room instantly. ──
 const wss = new WebSocketServer({ server, path: '/ws' });
 const rooms = new Map(); // roomId -> { clients:Set, messages:[], wipeTimer }
+const aishaSettings = new Map(); // roomId -> persisted room-wide Aisha toggle
+const aishaSettingsPath = path.join(DATA, 'aisha-settings.json');
+try {
+  const saved = JSON.parse(fs.readFileSync(aishaSettingsPath, 'utf8'));
+  for (const [id, enabled] of Object.entries(saved)) {
+    if (/^[a-f0-9]{64}$/.test(id) && typeof enabled === 'boolean') aishaSettings.set(id, enabled);
+  }
+} catch { /* first run or no settings file yet */ }
+function saveAishaSettings() {
+  const tmp = aishaSettingsPath + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(Object.fromEntries(aishaSettings)));
+  fs.renameSync(tmp, aishaSettingsPath); // atomic replace, so a crash cannot leave half-written JSON
+}
 
 // Unread messages must survive so async texting works ("hey" sent while the
 // other person is away). They expire after 24h regardless — ephemerality kept.
@@ -147,7 +160,7 @@ function sweep(r) {
 }
 
 function getRoom(id) {
-  if (!rooms.has(id)) rooms.set(id, { clients: new Set(), messages: [], wipeTimer: null });
+  if (!rooms.has(id)) rooms.set(id, { clients: new Set(), messages: [], wipeTimer: null, aishaEnabled: aishaSettings.get(id) ?? true });
   return rooms.get(id);
 }
 
@@ -319,7 +332,7 @@ wss.on('connection', (ws, req) => {
   sweep(r);
 
   // `seen` = someone OTHER than you confirmed this message (your read receipt).
-  ws.send(JSON.stringify({ type: 'history', messages: r.messages.map(m => ({
+  ws.send(JSON.stringify({ type: 'history', aishaEnabled: r.aishaEnabled !== false, aishaPersisted: aishaSettings.has(roomId), messages: r.messages.map(m => ({
     id: m.id, from: m.from, iv: m.iv, ct: m.ct, ts: m.ts, kind: m.kind || 'text',
     edited: !!m.edited, seen: m.seenBy.some(s => s !== subId),
   })) }));
@@ -330,6 +343,16 @@ wss.on('connection', (ws, req) => {
     try { m = JSON.parse(raw.toString()); } catch { return; }
     if (m.type === 'ping') { if (typeof m.vis === 'boolean') ws._vis = m.vis; if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'pong' })); return; }
     if (m.type === 'vis') { ws._vis = m.on === true; return; }
+    // Room-wide Aisha switch. Broadcast the authoritative value to every device.
+    if (m.type === 'aisha-setting' && typeof m.enabled === 'boolean') {
+      r.aishaEnabled = m.enabled;
+      aishaSettings.set(roomId, m.enabled);
+      try { saveAishaSettings(); }
+      catch (e) { console.error('[aisha] failed to persist room setting:', e.message); }
+      const payload = JSON.stringify({ type: 'aisha-setting', enabled: r.aishaEnabled, owner: subId });
+      for (const c of r.clients) if (c.readyState === 1) c.send(payload);
+      return;
+    }
     // Typing indicator: relayed live, never stored (carries no content).
     if (m.type === 'typing') {
       for (const c of r.clients) {

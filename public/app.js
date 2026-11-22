@@ -16,6 +16,7 @@ const lockBtn = $('lockBtn'), chips = $('chips');
 // ── State (the key lives in RAM only — never localStorage) ──
 const S = {
   unlocked: false,
+  aishaEnabled: (() => { try { return localStorage.getItem('cb_aisha_enabled') !== 'off'; } catch { return true; } })(), // cached room-wide setting
   key: null,        // CryptoKey (AES-GCM), derived from the secret
   roomId: null,     // sha256('room:' + secret) — the server only sees this
   ws: null,
@@ -393,6 +394,15 @@ function connect() {
     }
     if (m.type === 'pong') { hbMisses = 0; return; }
     if (m.type === 'presence') { S.online = m.online; setStatus(); }
+    if (m.type === 'aisha-setting' && typeof m.enabled === 'boolean') {
+      S.aishaEnabled = m.enabled;
+      try {
+        localStorage.setItem('cb_aisha_enabled', m.enabled ? 'on' : 'off');
+        if (typeof m.owner === 'string') localStorage.setItem('cb_aisha_owner', m.owner);
+      } catch {}
+      paintFam();
+      toast(m.enabled ? 'Aisha replies are on for both phones' : 'Aisha replies are off for both phones');
+    }
     if (m.type === 'typing' && m.from !== S.mySubId) {
       clearTimeout(S.remoteTypingTimer);
       if (m.on) {
@@ -401,6 +411,17 @@ function connect() {
       } else hideRemoteTyping();
     }
     if (m.type === 'history' && Array.isArray(m.messages)) {
+      const savedAisha = lsGet('cb_aisha_enabled', '');
+      const savedOwner = lsGet('cb_aisha_owner', '');
+      if (m.aishaPersisted) S.aishaEnabled = m.aishaEnabled !== false;
+      else if (savedAisha) S.aishaEnabled = savedAisha !== 'off';
+      else S.aishaEnabled = m.aishaEnabled !== false;
+      paintFam();
+      // If this device last changed the global switch, it is the local
+      // authority and restores its saved value after an ephemeral-server restart.
+      if (!m.aishaPersisted && savedAisha && savedOwner === S.mySubId) {
+        try { ws.send(JSON.stringify({ type: 'aisha-setting', enabled: S.aishaEnabled })); } catch {}
+      }
       chat.innerHTML = '';
       hideRemoteTyping();
       stopAudio(); clearBlobs();
@@ -597,7 +618,7 @@ const lsGet = (k, d = '') => { try { return localStorage.getItem(k) ?? d; } catc
 const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch {} };
 const lsDel = k => { try { localStorage.removeItem(k); } catch {} };
 const senderLabel = () => { const r = lsGet('aishaRole', ''); return r === 'daddy' ? 'Daddy' : r === 'mommy' ? 'Mommy' : ''; };
-const aishaCfg = () => ({ role: lsGet('aishaRole'), chat: lsGet('aishaChat', 'normal'), key: lsGet('aishaKey') });
+const aishaCfg = () => ({ role: lsGet('aishaRole'), chat: lsGet('aishaChat', 'normal'), enabled: S.aishaEnabled !== false, key: lsGet('aishaKey') });
 let aishaLast = +(lsGet('aishaLast', '0')) || 0, aishaDay = lsGet('aishaDay'), aishaHours = [];
 let aishaBusy = false, aishaKeyWarned = false, aishaKeyBad = false, aishaRoleWarned = false, aishaFilterWarned = false, aishaRetryT = null, aishaLastErr = '';
 const AISHA_CALLS = ['yesss??', 'what what what', 'present!!', 'i heard my name!!', 'sup', 'heyyy i missed you!!', 'yeah?? make it quick, cartoons are on'];
@@ -678,7 +699,7 @@ function aishaFallback(kind, lastUserText = '') {
   return pick(kind === 'reply' ? AISHA_REPLIES : AISHA_CALLS);
 }
 function aishaShouldRoll() {
-  if (!S.unlocked || !S.ws || S.ws.readyState !== 1) return false;
+  if (!aishaCfg().enabled || !S.unlocked || !S.ws || S.ws.readyState !== 1) return false;
   const now = Date.now();
   if (now - aishaLast < 5 * 60 * 1000) return false;
   aishaHours = aishaHours.filter(t => now - t < 3600000);
@@ -692,7 +713,7 @@ function aishaShouldRoll() {
 async function aishaReact(sent) {
   let tp = null;
   try {
-    if (!S.unlocked || !S.ws || S.ws.readyState !== 1) return;
+    if (!aishaCfg().enabled || !S.unlocked || !S.ws || S.ws.readyState !== 1) return;
     const calledByName = !!sent.text && /aisha/i.test(sent.text);
     const repliedTo = !!(sent.replyTo && (S.msgIndex.get(sent.replyTo.id) || {}).bot);
     const called = calledByName || repliedTo;
@@ -708,6 +729,7 @@ async function aishaReact(sent) {
     tp.innerHTML = '<span class="aishaTag"><span class="aishaAva">A</span><span>Aisha</span></span><span class="typing"><span></span><span></span><span></span></span>';
     chat.appendChild(tp); if (S.stick) scrollDown();
     await new Promise(r => setTimeout(r, 1200 + Math.random() * 1500));
+    if (!aishaCfg().enabled) return;
     let txt = await aishaAsk(mode, wake && mode !== 'wake');
     if (txt && /^nothing\.?!?$/.test(txt.trim().toLowerCase())) txt = '';
     if (!txt) {
@@ -718,13 +740,14 @@ async function aishaReact(sent) {
       if (/^nothing/i.test((txt || '').trim())) txt = '';
     }
     try { tp.remove(); } catch {}
-    if (txt) await aishaSend(txt);
+    if (txt && aishaCfg().enabled) await aishaSend(txt);
   } catch (e) { console.warn('aisha failed', e); }
   finally { try { if (tp) tp.remove(); } catch {} aishaBusy = false; }
 }
 async function aishaSend(text) {
+  if (!aishaCfg().enabled) return;
   const { iv, ct } = await encryptPayload({ t: text, bot: 'Aisha' });
-  if (!S.ws || S.ws.readyState !== 1) return;
+  if (!aishaCfg().enabled || !S.ws || S.ws.readyState !== 1) return;
   const id = (crypto.randomUUID ? crypto.randomUUID() : 'm' + Date.now().toString(36) + Math.random().toString(36).slice(2));
   S.ws.send(JSON.stringify({ type: 'msg', id, iv, ct, sender: 'Aisha' }));
   const rec = { text, mine: false, bot: 'Aisha', seen: true, acked: true, ts: Date.now() };
@@ -758,6 +781,8 @@ function paintFam() {
   const c = aishaCfg();
   $('roleDad').classList.toggle('sel', c.role === 'daddy');
   $('roleMom').classList.toggle('sel', c.role === 'mommy');
+  $('aishaOn').classList.toggle('sel', c.enabled);
+  $('aishaOff').classList.toggle('sel', !c.enabled);
   $('chatQuiet').classList.toggle('sel', c.chat === 'quiet');
   $('chatNormal').classList.toggle('sel', c.chat === 'normal');
   $('chatNosy').classList.toggle('sel', c.chat === 'nosy');
@@ -770,6 +795,13 @@ function paintFam() {
 }
 $('roleDad').onclick = () => { lsSet('aishaRole', 'daddy'); paintFam(); toast("Aisha knows this is Daddy's phone 🧒"); };
 $('roleMom').onclick = () => { lsSet('aishaRole', 'mommy'); paintFam(); toast("Aisha knows this is Mommy's phone 🧒"); };
+function setAishaEnabled(enabled) {
+  if (!S.unlocked || !S.ws || S.ws.readyState !== 1) return toast('Connect to the chat first');
+  try { S.ws.send(JSON.stringify({ type: 'aisha-setting', enabled })); }
+  catch { toast('Could not update Aisha setting'); }
+}
+$('aishaOn').onclick = () => setAishaEnabled(true);
+$('aishaOff').onclick = () => setAishaEnabled(false);
 $('chatQuiet').onclick = () => { lsSet('aishaChat', 'quiet'); paintFam(); };
 $('chatNormal').onclick = () => { lsSet('aishaChat', 'normal'); paintFam(); };
 $('chatNosy').onclick = () => { lsSet('aishaChat', 'nosy'); paintFam(); toast('Nosy Aisha. Brave. 👀'); };

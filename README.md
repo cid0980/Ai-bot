@@ -36,6 +36,10 @@ node server.js
 # open http://localhost:3000 (use two browsers/tabs to test both sides)
 ```
 
+## Persisting room settings
+
+The room-wide Aisha On/Off setting is saved to `aisha-settings.json` inside the server data directory, so it survives process restarts when that directory is on persistent storage. By default the data directory is `./data`; set `DATA_DIR` to a mounted persistent directory on your host if needed. On ephemeral hosts (including Render's free service), the mobile device that last changed the switch also caches the setting in its local storage and restores it when it reconnects—no database is required. The setting may remain at its default until that device reconnects; clearing that device's browser storage also removes its saved copy.
+
 ## Put it on the internet (Render, free, ~5 min)
 
 Push notifications require **HTTPS**, so the app needs a permanent home:
