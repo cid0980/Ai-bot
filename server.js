@@ -4,9 +4,8 @@
 // (a hash) and AES-encrypted blobs. (One exception: Aisha's brain —
 // phones send it readable prompts transiently, never logged or stored,
 // because Gemini cannot read ciphertext.)
-// Messages live in RAM only; seen
-// messages are wiped ~30s after everyone leaves, unread ones expire
-// after 1h, and a restart wipes everything instantly.
+// Messages live in RAM only; unread messages stay until first seen, then
+// expire one hour later. A restart clears everything instantly.
 // ─────────────────────────────────────────────────────────────
 import express from 'express';
 import { WebSocketServer } from 'ws';
@@ -151,12 +150,14 @@ function saveAishaSettings() {
   fs.renameSync(tmp, aishaSettingsPath); // atomic replace, so a crash cannot leave half-written JSON
 }
 
-// Unread messages must survive so async texting works ("hey" sent while the
-// other person is away). All server history expires after one hour.
+// Unread messages stay available until a recipient reads them. The one-hour
+// expiry clock starts at that first read, not at send time.
 const MAX_AGE = 60 * 60 * 1000;
+const MAX_ROOM_MESSAGES = 1000;
+const MAX_ROOM_CIPHER = 50_000_000;
 function sweep(r) {
   const now = Date.now();
-  r.messages = r.messages.filter(m => now - m.ts < MAX_AGE);
+  r.messages = r.messages.filter(m => !m.seenAt || now - m.seenAt < MAX_AGE);
 }
 function expireOldMessages() {
   for (const [roomId, r] of rooms) {
@@ -351,10 +352,12 @@ wss.on('connection', (ws, req) => {
     // Send only missing messages (plus edits); cached ciphertext is identified by ID.
     const messages = r.messages.filter(m => !known.has(m.id) || m.edited).map(m => ({
       id: m.id, from: m.from, iv: m.iv, ct: m.ct, ts: m.ts, kind: m.kind || 'text',
-      edited: !!m.edited, seen: m.seenBy.some(s => s !== subId),
+      edited: !!m.edited, seen: m.seenBy.some(s => s !== subId), seenAt: m.seenAt || null,
     }));
-    const seenIds = r.messages.filter(m => m.seenBy.some(s => s !== subId)).map(m => m.id);
-    ws.send(JSON.stringify({ type: 'history', aishaEnabled: r.aishaEnabled !== false, aishaPersisted: aishaSettings.has(roomId), messages, allIds: r.messages.map(m => m.id), seenIds }));
+    const seenMessages = r.messages.filter(m => m.seenBy.some(s => s !== subId));
+    const seenIds = seenMessages.map(m => m.id);
+    const seenAtById = Object.fromEntries(seenMessages.map(m => [m.id, m.seenAt || null]));
+    ws.send(JSON.stringify({ type: 'history', aishaEnabled: r.aishaEnabled !== false, aishaPersisted: aishaSettings.has(roomId), messages, allIds: r.messages.map(m => m.id), seenIds, seenAtById }));
   };
   // Compatibility fallback for already-open/older clients that don't send a sync request.
   ws._historyTimer = setTimeout(() => sendHistory(null), 1500);
@@ -394,10 +397,12 @@ wss.on('connection', (ws, req) => {
       for (const msg of r.messages) {
         if (!m.ids.includes(msg.id)) continue;
         if (!msg.seenBy.includes(subId)) msg.seenBy.push(subId);
+        if (subId !== msg.from && !msg.seenAt) msg.seenAt = Date.now();
         confirmed.push(msg.id);
       }
       if (confirmed.length) {
-        const payload = JSON.stringify({ type: 'seen', by: subId, ids: confirmed });
+        const seenAtById = Object.fromEntries(confirmed.map(id => [id, r.messages.find(msg => msg.id === id)?.seenAt || null]));
+        const payload = JSON.stringify({ type: 'seen', by: subId, ids: confirmed, seenAtById });
         for (const c of r.clients) {
           if (c !== ws && c.readyState === 1) c.send(payload);
         }
@@ -420,10 +425,16 @@ wss.on('connection', (ws, req) => {
       if (m.ct.length > (kind ? 37000000 : 20000)) return;
       // Client-generated id (lets the sender render + edit instantly).
       const id = (typeof m.id === 'string' && /^[A-Za-z0-9-]{8,64}$/.test(m.id)) ? m.id : crypto.randomUUID();
+      const existing = r.messages.some(x => x.id === id);
       const msg = { id, from: subId, iv: m.iv, ct: m.ct, ts: Date.now(), seenBy: [], ...(kind ? { kind } : {}) };
-      if (!r.messages.some(x => x.id === id)) r.messages.push(msg); // retry-safe
-      // Keep media bursts from allowing a room's in-memory history to grow without bound.
-      while (r.messages.length > 200 || r.messages.reduce((n, x) => n + (x.ct || '').length, 0) > 50_000_000) r.messages.shift();
+      if (!existing) {
+        const storedChars = r.messages.reduce((n, x) => n + (x.ct || '').length, 0);
+        if (r.messages.length >= MAX_ROOM_MESSAGES || storedChars + m.ct.length > MAX_ROOM_CIPHER) {
+          if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'nack', clientId: id, reason: 'room-full' }));
+          return; // never evict unread or not-yet-expired history to make space
+        }
+        r.messages.push(msg);
+      }
       for (const c of r.clients) {
         if (c !== ws && c.readyState === 1) c.send(JSON.stringify({ type: 'msg', message: msg }));
       }
@@ -441,15 +452,8 @@ wss.on('connection', (ws, req) => {
     clearTimeout(ws._historyTimer);
     r.clients.delete(ws);
     broadcastPresence(roomId);
-    if (r.clients.size === 0) {
-      // Everybody left (closed the app). 30s grace covers accidental
-      // refreshes — then messages everyone has SEEN are gone forever.
-      // Unread messages stay until delivered, but never beyond one hour.
-      r.wipeTimer = setTimeout(() => {
-        sweep(r);
-        r.messages = r.messages.filter(msg => !msg.seenBy.some(s => s !== msg.from));
-        if (r.messages.length === 0) rooms.delete(roomId);
-      }, 30_000);
-    }
+    // No disconnect-based wipe: unread messages remain; seen messages are
+    // removed by sweep() one hour after their first read.
+    if (r.clients.size === 0 && r.messages.length === 0) rooms.delete(roomId);
   });
 });

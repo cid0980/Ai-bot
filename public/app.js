@@ -305,7 +305,7 @@ async function loadCachedMessages(roomId) {
     tx.onerror = () => reject(tx.error || new Error('cache read failed'));
   });
 }
-async function mergeCachedMessages(roomId, incoming = [], allIds = null, seenIds = null) {
+async function mergeCachedMessages(roomId, incoming = [], allIds = null, seenIds = null, seenAtById = null) {
   try {
     const db = await openMessageCache();
     if (!Array.isArray(allIds) && !Array.isArray(seenIds)) {
@@ -327,7 +327,7 @@ async function mergeCachedMessages(roomId, incoming = [], allIds = null, seenIds
       req.onsuccess = () => {
         const byId = new Map(req.result.map(x => [x.message.id, x.message]));
         const cutoff = Date.now() - 60 * 60 * 1000;
-        for (const [id, m] of byId) if (!m.ts || m.ts < cutoff) byId.delete(id);
+        for (const [id, m] of byId) if (m.seenAt && m.seenAt < cutoff) byId.delete(id);
         if (Array.isArray(allIds)) {
           const live = new Set(allIds);
           for (const [id, m] of byId) {
@@ -338,7 +338,10 @@ async function mergeCachedMessages(roomId, incoming = [], allIds = null, seenIds
         for (const m of incoming) if (m && m.id) byId.set(m.id, { ...m, pending: false });
         if (Array.isArray(seenIds)) {
           const seen = new Set(seenIds);
-          for (const [id, m] of byId) m.seen = seen.has(id);
+          for (const [id, m] of byId) {
+            m.seen = seen.has(id);
+            if (m.seen && seenAtById && seenAtById[id]) m.seenAt = seenAtById[id];
+          }
         }
         const sorted = [...byId.values()].sort((a, b) => a.ts - b.ts);
         const keep = [];
@@ -430,7 +433,7 @@ async function renderMessage(m, who, predecoded) {
     maybeDayDivider(m.ts);
     if (p.kind === 'img' || p.kind === 'audio' || p.kind === 'video') {
       const rec = { text: p.kind === 'img' ? 'Photo' : p.kind === 'video' ? 'Video' : 'Voice note', kind: p.kind, mime: p.mime,
-        dur: p.dur || 0, mine: who === 'me', replyTo: p.replyTo || null, seen: !!m.seen, acked: true, ts: m.ts, url: null };
+        dur: p.dur || 0, mine: who === 'me', replyTo: p.replyTo || null, seen: !!m.seen, seenAt: m.seenAt || null, acked: true, ts: m.ts, url: null };
       try {
         const bytes = b64d(p.data);
         rec.url = URL.createObjectURL(new Blob([bytes], { type: p.mime || 'application/octet-stream' }));
@@ -446,7 +449,7 @@ async function renderMessage(m, who, predecoded) {
       chatBubbleAisha(m.id, rec);
       return rec;
     }
-    const rec = { text: p.t, mine: who === 'me', replyTo: p.replyTo || null, seen: !!m.seen, acked: true, ts: m.ts };
+      const rec = { text: p.t, mine: who === 'me', replyTo: p.replyTo || null, seen: !!m.seen, seenAt: m.seenAt || null, acked: true, ts: m.ts };
     S.msgIndex.set(m.id, rec);
     chatBubble(m.id, who, p.t, p.replyTo || null, !!m.edited, rec);
     return rec;
@@ -462,11 +465,14 @@ async function renderHistoryMessages(messages) {
     for (const m of batch) {
       const old = S.msgIndex.get(m.id);
       if (!old) { fresh.push(m); continue; }
-      if (old.mine && m.seen && !old.seen) {
+      if (m.seen) {
         old.seen = true;
-        old.acked = true;
-        const row = chat.querySelector(`.msg[data-id="${CSS.escape(m.id)}"]`);
-        if (row) paintStatus(row, old);
+        old.seenAt = m.seenAt || old.seenAt || null;
+        if (old.mine) {
+          old.acked = true;
+          const row = chat.querySelector(`.msg[data-id="${CSS.escape(m.id)}"]`);
+          if (row) paintStatus(row, old);
+        }
       }
       if (m.edited) await applyEdit(m);
     }
@@ -493,7 +499,7 @@ function pruneChatToIds(ids) {
   const live = new Set(ids || []), cutoff = Date.now() - 60 * 60 * 1000;
   let changed = false;
   for (const [id, rec] of S.msgIndex) {
-    const expired = !rec.ts || rec.ts < cutoff;
+    const expired = !!rec.seenAt && rec.seenAt < cutoff;
     if (live.has(id) || (!expired && (pendingAck.has(id) || failedQueue.has(id)))) continue;
     clearPending(id);
     const row = chat.querySelector(`.msg[data-id="${CSS.escape(id)}"]`);
@@ -507,7 +513,7 @@ function pruneChatToIds(ids) {
 setInterval(() => {
   if (!S.unlocked || !S.roomId) return;
   const cutoff = Date.now() - 60 * 60 * 1000;
-  const live = [...S.msgIndex].filter(([, rec]) => rec.ts >= cutoff).map(([id]) => id);
+  const live = [...S.msgIndex].filter(([, rec]) => !rec.seenAt || rec.seenAt >= cutoff).map(([id]) => id);
   if (live.length !== S.msgIndex.size) {
     pruneChatToIds(live);
     mergeCachedMessages(S.roomId, [], live, null);
@@ -624,6 +630,22 @@ function connect() {
       else if (!m.online && (!S.pushOffAt || Date.now() - S.pushOffAt > 5 * 60 * 1000)) { S.pushOffAt = Date.now(); toast("Friend has notifications off — they won't ping"); }
       return;
     }
+    if (m.type === 'nack' && typeof m.clientId === 'string') {
+      const queued = pendingAck.get(m.clientId);
+      if (queued) {
+        clearTimeout(queued.timer);
+        pendingAck.delete(m.clientId);
+        failedQueue.set(m.clientId, { iv: queued.iv, ct: queued.ct, kind: queued.kind, tries: queued.tries || 0 });
+      }
+      const rec = S.msgIndex.get(m.clientId);
+      if (rec) {
+        rec.failed = true;
+        const row = chat.querySelector(`.msg[data-id="${CSS.escape(m.clientId)}"]`);
+        if (row) { row.classList.add('failed'); row.title = 'Room is full — unread messages are being kept; tap to retry later'; paintStatus(row, rec); }
+      }
+      toast('Room is full. Unread messages are kept; retry after space opens.');
+      return;
+    }
     if (m.type === 'pong') { hbMisses = 0; return; }
     if (m.type === 'prune' && Array.isArray(m.ids)) {
       pruneChatToIds(m.ids);
@@ -681,16 +703,17 @@ function connect() {
       const seenIds = Array.isArray(m.seenIds) ? m.seenIds : m.messages.filter(x => x.seen).map(x => x.id);
       for (const id of seenIds) {
         const rec = S.msgIndex.get(id);
-        if (rec && rec.mine && !rec.seen) {
+        if (rec && rec.mine) {
           rec.seen = true; rec.acked = true;
+          rec.seenAt = m.seenAtById && m.seenAtById[id] || rec.seenAt || Date.now();
           const row = chat.querySelector(`.msg[data-id="${CSS.escape(id)}"]`);
           if (row) paintStatus(row, rec);
         }
       }
-      if (!allIds.length && !S.msgIndex.size) sys('Connected. Messages expire after one hour; seen messages may disappear sooner.');
+      if (!allIds.length && !S.msgIndex.size) sys('Unseen messages stay until read; then expire after one hour.');
       scrollDown();
       sendSeen(allIds); // receipt updates server-side seen state, including cached messages
-      mergeCachedMessages(S.roomId, m.messages, allIds, seenIds);
+      mergeCachedMessages(S.roomId, m.messages, allIds, seenIds, m.seenAtById || null);
       flushFailed();
     }
     if (m.type === 'msg' && m.message) {
@@ -707,11 +730,13 @@ function connect() {
     if (m.type === 'seen' && m.by !== S.mySubId && Array.isArray(m.ids)) {
       for (const id of m.ids) {
         const rec = S.msgIndex.get(id);
-        if (!rec || !rec.mine || rec.seen) continue;
+        if (!rec || !rec.mine) continue;
         rec.seen = true; rec.acked = true;
+        rec.seenAt = m.seenAtById && m.seenAtById[id] || rec.seenAt || Date.now();
         const row = chat.querySelector(`.msg[data-id="${CSS.escape(id)}"]`);
         if (row) paintStatus(row, rec);
       }
+      mergeCachedMessages(S.roomId, [], null, m.ids, m.seenAtById || null);
     }
     if (m.type === 'acked' && typeof m.clientId === 'string') {
       const queued = pendingAck.get(m.clientId);
