@@ -600,6 +600,7 @@ function connect() {
   statusDot.className = 'dot retry';
   ws.onopen = () => {
     if (ws !== S.ws || !S.unlocked) { try { ws.close(); } catch {} return; }
+    typingSent = false; // a new socket must announce active typing again
     clearTimeout(S.connectTimer); S.connectTimer = null;
     if (S.unlocked) setStatus();
     // Only reset backoff after the socket has stayed healthy for a while;
@@ -666,7 +667,7 @@ function connect() {
       clearTimeout(S.remoteTypingTimer);
       if (m.on) {
         if (!S.remoteTyping || !S.remoteTyping.isConnected) S.remoteTyping = showTyping(S.stick);
-        S.remoteTypingTimer = setTimeout(hideRemoteTyping, 5000); // safety if 'off' is lost
+        S.remoteTypingTimer = setTimeout(hideRemoteTyping, 7000); // fail-safe if the sender disconnects or an 'off' is lost
       } else hideRemoteTyping();
     }
     if (m.type === 'history' && Array.isArray(m.messages)) {
@@ -759,6 +760,7 @@ function connect() {
   ws.onclose = () => {
     // Ignore closes from sockets replaced by quick rejoin / a newer retry.
     if (ws !== S.ws || !S.unlocked) return;
+    typingSent = false; stopTypingPulse(); clearTimeout(typingTimer); typingTimer = null;
     clearTimeout(S.connectTimer); S.connectTimer = null;
     clearTimeout(S.stableTimer); S.stableTimer = null;
     S.ws = null;
@@ -833,6 +835,7 @@ async function unlock(secret) {
 }
 
 function lock(msg) {
+  clearTimeout(typingTimer); sendTyping(false);
   S.unlocked = false; S.key = null; S.roomId = null;
   // NOTE: the secret STAYS in sessionStorage (tab memory, dies with the tab)
   // so triple-tapping 🔒 can quick-rejoin. True logout = close the tab.
@@ -1460,12 +1463,17 @@ function cancelEdit() {
 $('editCancel').onclick = cancelEdit;
 
 // ── Typing indicator (sender side) ──
-let typingTimer = null, typingSent = false;
-function sendTyping(on) {
-  if (!S.unlocked || !S.ws || S.ws.readyState !== 1) return;
-  if (on === typingSent) return;
+let typingTimer = null, typingPulseTimer = null, typingSent = false;
+function stopTypingPulse() { clearInterval(typingPulseTimer); typingPulseTimer = null; }
+function sendTyping(on, heartbeat = false) {
+  if (!S.unlocked || !S.ws || S.ws.readyState !== 1) {
+    if (!on) { typingSent = false; stopTypingPulse(); }
+    return;
+  }
+  if (on === typingSent && !heartbeat) return;
   typingSent = on;
   try { S.ws.send(JSON.stringify({ type: 'typing', on })); } catch {}
+  if (!on) stopTypingPulse();
 }
 input.addEventListener('input', () => {
   if (input.textContent === '') input.innerHTML = '';
@@ -1473,7 +1481,11 @@ input.addEventListener('input', () => {
   if (!S.unlocked) return;
   sendTyping(true);
   clearTimeout(typingTimer);
-  typingTimer = setTimeout(() => sendTyping(false), 2500);
+  typingTimer = setTimeout(() => sendTyping(false), 5000);
+  if (!typingPulseTimer) typingPulseTimer = setInterval(() => {
+    if (!typingSent) return stopTypingPulse();
+    sendTyping(true, true); // refresh the remote indicator during long paragraphs
+  }, 2500);
 });
 
 // ── Photos + voice notes (E2E-encrypted blobs, same wipe rules as text) ──
